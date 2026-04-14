@@ -1,0 +1,22 @@
+# Build output
+host/bin/
+host/obj/
+api/src/*/bin/
+api/src/*/obj/
+nupkgs/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Secrets (use appsettings.json for defaults, Development.json for overrides)
+host/appsettings.Development.json

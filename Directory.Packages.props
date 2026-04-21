@@ -167,17 +167,17 @@
          via distribution/propagate-packages.sh — one line change here,
          every consumer picks up on next restore. Verified against the
          MonoceptOfficial GitHub Packages feed 2026-04-21. -->
-    <PackageVersion Include="Novara.Shell.Gateway"                Version="1.0.19" />
-    <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.17" />
-    <PackageVersion Include="Novara.Modules.Bundle"               Version="2026.4.17" />
+    <PackageVersion Include="Novara.Shell.Gateway"                Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Modules.Bundle"               Version="2026.4.21.1" />
 
     <!-- Connectors — Novara's outbound adapter modules -->
     <PackageVersion Include="Novara.Connector.GitHub"             Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Connector.Intelligence"       Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Connector.Jira"               Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Connector.SignalR"            Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Connector.Smtp"               Version="1.0.0" />
-    <PackageVersion Include="Novara.Connector.ViberHub"           Version="1.0.0" />
+    <PackageVersion Include="Novara.Connector.Smtp"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Connector.ViberHub"           Version="2026.4.21.1" />
   </ItemGroup>
 
   <!-- ═══ Third-party production dependencies ═══ -->

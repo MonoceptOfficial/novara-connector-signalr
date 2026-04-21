@@ -7,6 +7,53 @@
   `distribution/propagate-packages.sh`, and every module in the
   workspace picks up the new pin on next build — no 43-csproj edit.
 
+  VERSIONING STANDARD — CalVer (adopted 2026-04-21)
+  ═══════════════════════════════════════════════════════════════════
+  Every Novara package uses `YYYY.M.D.N` (calendar versioning):
+      2026.4.21.1   = first release on April 21, 2026
+      2026.4.21.2   = second release same day (rare — hotfix or
+                      two bumps in one day)
+      2026.4.22.1   = next day
+
+  WHY: Novara ships continuously. 43 modules moving weekly. A date-
+  based version tells the operator:
+      • When was this shipped?        — visible in the version itself
+      • Is this current?              — glance at today's date
+      • Which version landed before   — sort order is chronological
+        / after another?
+      • How old is my module          — the date gap is the age
+        vs the Gateway?
+
+  Semver gave us major.minor.patch.N where N meant something. CalVer
+  gives us date.N where the date IS the meaning. For a platform where
+  we control every consumer (via this CPM file) and deprecate nothing
+  silently, the semver "breaking-change signal" is redundant — we
+  have a better one: per-release CHANGELOG.md entries + pre-commit
+  hooks enforcing them.
+
+  NuGet sort order: CalVer segments sort numerically — 2026.4.21.1 <
+  2026.4.21.2 < 2026.4.22.1 < 2026.5.1.1 < 2027.1.1.1. Works cleanly.
+
+  EXTERNAL dependencies (Dapper, Npgsql, Scriban, etc.) stay on their
+  upstream semver — we don't rewrite the rest of the ecosystem.
+
+  BREAKING CHANGES — how to communicate without semver's major-bump
+  ═══════════════════════════════════════════════════════════════════
+    1. Every release writes a CHANGELOG.md entry (pre-commit enforced).
+    2. Breaking changes get a BREAKING: line in that entry + a
+       `- BREAKING:` tag in the NuGet package's ReleaseNotes.
+    3. Year transitions (2026.x → 2027.x) are the informal "major
+       bump" moment — plan non-trivial surface changes for new-year.
+    4. ADR required for any SDK breaking change.
+
+  LEGACY SEMVER PINS — what the numbers below mean during cutover
+  ═══════════════════════════════════════════════════════════════════
+  Versions like 1.7.0, 1.1.0, etc. below are PRE-CALVER releases
+  pinned at their existing published state. They stay until the next
+  release of each package, which bumps the version to the current
+  calendar date (YYYY.M.D.N). Within ~3 months every package should
+  have rolled to CalVer.
+
   ═══════════════════════════════════════════════════════════════════
 
   HOW IT WORKS
@@ -70,48 +117,48 @@
 
   <!-- ═══ Novara platform packages ═══ -->
   <ItemGroup>
-    <PackageVersion Include="Novara.Module.SDK"                  Version="1.7.0" />
+    <PackageVersion Include="Novara.Module.SDK"                  Version="2026.4.21.1" />
 
     <!-- Module NuGets — listed here so modules that reference siblings
          (e.g. Gateway referencing every module in NuGetPack mode) don't
          hand-pin. Each module's own csproj still declares its own
          <Version> in the PropertyGroup (that's the package's output
          version, not a dependency). -->
-    <PackageVersion Include="Novara.Module.Activities"            Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Admin"                 Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.AppGateway"            Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Architecture"          Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Artifacts"             Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Agentic"               Version="1.1.1" />
-    <PackageVersion Include="Novara.Module.Audit"                 Version="1.0.4" />
-    <PackageVersion Include="Novara.Module.CodeReview"            Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Collaborate"           Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Communicate"           Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Dashboard"             Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.DesignStudio"          Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.DesktopSync"           Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.EnterpriseThinkBoard"  Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Health"                Version="1.0.3" />
-    <PackageVersion Include="Novara.Module.Incidents"             Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Infrastructure"        Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Intelligence"          Version="1.1.0" />
-    <PackageVersion Include="Novara.Module.Issues"                Version="1.0.3" />
-    <PackageVersion Include="Novara.Module.KnowledgeBank"         Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Notifications"         Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.PersonalSettings"      Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.PromptStudio"          Version="1.1.1" />
-    <PackageVersion Include="Novara.Module.Quality"               Version="1.0.4" />
-    <PackageVersion Include="Novara.Module.Releases"              Version="1.0.4" />
-    <PackageVersion Include="Novara.Module.Reports"               Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Retrospectives"        Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Roadmap"               Version="1.1.0" />
-    <PackageVersion Include="Novara.Module.Rules"                 Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Search"                Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.ThinkBoard"            Version="1.0.3" />
-    <PackageVersion Include="Novara.Module.Tracker"               Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Activities"            Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Admin"                 Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.AppGateway"            Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Architecture"          Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Artifacts"             Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Agentic"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Audit"                 Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.CodeReview"            Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Collaborate"           Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Communicate"           Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Dashboard"             Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.DesignStudio"          Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.DesktopSync"           Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.EnterpriseThinkBoard"  Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Health"                Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Incidents"             Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Infrastructure"        Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Intelligence"          Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Issues"                Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.KnowledgeBank"         Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Notifications"         Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.PersonalSettings"      Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.PromptStudio"          Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Quality"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Releases"              Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Reports"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Retrospectives"        Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Roadmap"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Rules"                 Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Search"                Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.ThinkBoard"            Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Tracker"               Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.Todo"                  Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Viber"                 Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Workflows"             Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Viber"                 Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Workflows"             Version="2026.4.21.1" />
 
     <!-- Shell-side NuGets consumed by module DevHost csprojs. Pinned
          explicit (not floating) per CPM philosophy: reproducibility over
@@ -125,12 +172,12 @@
     <PackageVersion Include="Novara.Modules.Bundle"               Version="2026.4.17" />
 
     <!-- Connectors — Novara's outbound adapter modules -->
-    <PackageVersion Include="Novara.Connector.GitHub"             Version="1.4.0" />
-    <PackageVersion Include="Novara.Connector.Intelligence"       Version="1.4.1" />
-    <PackageVersion Include="Novara.Connector.Jira"               Version="1.4.0" />
-    <PackageVersion Include="Novara.Connector.SignalR"            Version="1.4.0" />
-    <PackageVersion Include="Novara.Connector.Smtp"               Version="1.4.0" />
-    <PackageVersion Include="Novara.Connector.ViberHub"           Version="1.4.0" />
+    <PackageVersion Include="Novara.Connector.GitHub"             Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Connector.Intelligence"       Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Connector.Jira"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Connector.SignalR"            Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Connector.Smtp"               Version="1.0.0" />
+    <PackageVersion Include="Novara.Connector.ViberHub"           Version="1.0.0" />
   </ItemGroup>
 
   <!-- ═══ Third-party production dependencies ═══ -->

@@ -1,0 +1,159 @@
+<!--
+  Novara Central Package Management — canonical version pins for the platform.
+
+  ═══════════════════════════════════════════════════════════════════
+  This file is the ONE source of truth for every NuGet version every
+  module in the Novara platform depends on. Bump here, re-run
+  `distribution/propagate-packages.sh`, and every module in the
+  workspace picks up the new pin on next build — no 43-csproj edit.
+
+  ═══════════════════════════════════════════════════════════════════
+
+  HOW IT WORKS
+    MSBuild's Central Package Management (CPM) — 16.8+ — reads
+    `Directory.Packages.props` by walking UP the directory tree from
+    each .csproj. The closest file wins. In the workspace:
+
+      • Workspace-root copy at  Workspace/Directory.Packages.props
+        governs the CTO's full-workspace dev build.
+
+      • Per-module copy at      <module-repo>/Directory.Packages.props
+        governs a module-dev's single-repo clone (MSBuild finds this
+        closer than the workspace copy, so the module clones stay
+        self-sufficient even without the full workspace checked out).
+
+    Both copies are identical — kept in sync by
+    `NovaraSDK/distribution/propagate-packages.sh`. Edit ONLY this
+    template file, run the script, let it update all 43+ consumers.
+
+  HOW EACH .csproj CHANGES
+    Before CPM:
+      <PackageReference Include="Novara.Module.SDK" Version="1.2.0" />
+      <PackageReference Include="Dapper" Version="2.1.66" />
+    After CPM:
+      <PackageReference Include="Novara.Module.SDK" />
+      <PackageReference Include="Dapper" />
+
+    Version attribute is DROPPED. MSBuild fetches it from this file.
+    Attempting to specify Version in a .csproj now produces a build
+    warning because `ManagePackageVersionsCentrally=true` is on.
+
+  BUMPING A VERSION
+    1. Edit this template ONLY. Change one line.
+    2. Commit to NovaraSDK.
+    3. Run:
+         cd NovaraSDK/distribution && ./propagate-packages.sh
+    4. Commit the resulting per-module updates (the script can do
+       commits via the `commit` flag (two dashes before it — omitted here
+       because XML comments can't contain two consecutive dashes).
+    5. Every module developer gets the new version on next `git pull`.
+
+  NEVER-BREAK RULES
+    • Never add Version attributes back to individual .csprojs.
+    • Never leave a package referenced in a .csproj that isn't in this
+      file (CPM errors with NU1010 and the build fails).
+    • Never set a PackageReference Version="*" (floating) in this file
+      — defeats the reproducibility CPM is designed to preserve.
+  ═══════════════════════════════════════════════════════════════════
+-->
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- When set, any <PackageReference> with a Version attribute emits
+         a build warning. Forces every csproj to honor this file as the
+         single source of truth. -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+    <!-- Ensures transitive dependencies also use the central versions
+         when possible — prevents "SDK 1.7.0 but a transitive pull drags
+         1.2.0" drift. -->
+  </PropertyGroup>
+
+  <!-- ═══ Novara platform packages ═══ -->
+  <ItemGroup>
+    <PackageVersion Include="Novara.Module.SDK"                  Version="1.7.0" />
+
+    <!-- Module NuGets — listed here so modules that reference siblings
+         (e.g. Gateway referencing every module in NuGetPack mode) don't
+         hand-pin. Each module's own csproj still declares its own
+         <Version> in the PropertyGroup (that's the package's output
+         version, not a dependency). -->
+    <PackageVersion Include="Novara.Module.Activities"            Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Admin"                 Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.AppGateway"            Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Architecture"          Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Artifacts"             Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Agentic"               Version="1.1.1" />
+    <PackageVersion Include="Novara.Module.Audit"                 Version="1.0.4" />
+    <PackageVersion Include="Novara.Module.CodeReview"            Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Collaborate"           Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Communicate"           Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Dashboard"             Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.DesignStudio"          Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.DesktopSync"           Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.EnterpriseThinkBoard"  Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Health"                Version="1.0.3" />
+    <PackageVersion Include="Novara.Module.Incidents"             Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Infrastructure"        Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Intelligence"          Version="1.1.0" />
+    <PackageVersion Include="Novara.Module.Issues"                Version="1.0.3" />
+    <PackageVersion Include="Novara.Module.KnowledgeBank"         Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Notifications"         Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.PersonalSettings"      Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.PromptStudio"          Version="1.1.1" />
+    <PackageVersion Include="Novara.Module.Quality"               Version="1.0.4" />
+    <PackageVersion Include="Novara.Module.Releases"              Version="1.0.4" />
+    <PackageVersion Include="Novara.Module.Reports"               Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Retrospectives"        Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Roadmap"               Version="1.1.0" />
+    <PackageVersion Include="Novara.Module.Rules"                 Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Search"                Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.ThinkBoard"            Version="1.0.3" />
+    <PackageVersion Include="Novara.Module.Tracker"               Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Todo"                  Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Viber"                 Version="1.0.2" />
+    <PackageVersion Include="Novara.Module.Workflows"             Version="1.0.2" />
+
+    <!-- Shell-side NuGets consumed by module DevHost csprojs. Pinned
+         explicit (not floating) per CPM philosophy: reproducibility over
+         convenience. Shell.UI + Modules.Bundle use calendar versioning
+         (YYYY.M.D); the Gateway uses traditional semver. Bumps roll out
+         via distribution/propagate-packages.sh — one line change here,
+         every consumer picks up on next restore. Verified against the
+         MonoceptOfficial GitHub Packages feed 2026-04-21. -->
+    <PackageVersion Include="Novara.Shell.Gateway"                Version="1.0.19" />
+    <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.17" />
+    <PackageVersion Include="Novara.Modules.Bundle"               Version="2026.4.17" />
+
+    <!-- Connectors — Novara's outbound adapter modules -->
+    <PackageVersion Include="Novara.Connector.GitHub"             Version="1.4.0" />
+    <PackageVersion Include="Novara.Connector.Intelligence"       Version="1.4.1" />
+    <PackageVersion Include="Novara.Connector.Jira"               Version="1.4.0" />
+    <PackageVersion Include="Novara.Connector.SignalR"            Version="1.4.0" />
+    <PackageVersion Include="Novara.Connector.Smtp"               Version="1.4.0" />
+    <PackageVersion Include="Novara.Connector.ViberHub"           Version="1.4.0" />
+  </ItemGroup>
+
+  <!-- ═══ Third-party production dependencies ═══ -->
+  <ItemGroup>
+    <PackageVersion Include="Dapper"                              Version="2.1.66" />
+    <PackageVersion Include="Npgsql"                              Version="9.0.3" />
+    <PackageVersion Include="Scriban"                             Version="7.1.0" />
+    <!-- Scriban 7.1.0 — pinned above 5.12.1 to close GHSA-xcx6-vp38-8hr5 (high)
+         + GHSA-xw6w-9jjh-p9cr (moderate). Do not downgrade. -->
+    <PackageVersion Include="MailKit"                             Version="4.14.0" />
+    <PackageVersion Include="NLog.Web.AspNetCore"                 Version="5.4.0" />
+    <PackageVersion Include="Swashbuckle.AspNetCore"              Version="7.3.1" />
+    <PackageVersion Include="Yarp.ReverseProxy"                   Version="2.3.0" />
+
+    <!-- Microsoft AspNetCore / SignalR — track .NET 10 preview cadence -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0-preview.3.25171.18" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client"           Version="10.0.0-preview.3.25172.1" />
+  </ItemGroup>
+
+  <!-- ═══ Test-only dependencies ═══ -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.NET.Test.Sdk"              Version="17.14.0" />
+    <PackageVersion Include="xunit"                               Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio"           Version="3.1.0" />
+  </ItemGroup>
+</Project>

@@ -142,16 +142,16 @@
     <PackageVersion Include="Novara.Module.Incidents"             Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.Infrastructure"        Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.Intelligence"          Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Issues"                Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Issues"                Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Module.KnowledgeBank"         Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.Notifications"         Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.PersonalSettings"      Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.PromptStudio"          Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Quality"               Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Releases"              Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Quality"               Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Releases"              Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Module.Reports"               Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.Retrospectives"        Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Roadmap"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Roadmap"               Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Module.Rules"                 Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.Search"                Version="2026.4.21.1" />
     <PackageVersion Include="Novara.Module.ThinkBoard"            Version="2026.4.21.1" />
@@ -168,7 +168,7 @@
          every consumer picks up on next restore. Verified against the
          MonoceptOfficial GitHub Packages feed 2026-04-21. -->
     <PackageVersion Include="Novara.Shell.Gateway"                Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Modules.Bundle"               Version="2026.4.21.1" />
 
     <!-- Connectors — Novara's outbound adapter modules -->

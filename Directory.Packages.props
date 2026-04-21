@@ -117,48 +117,48 @@
 
   <!-- ═══ Novara platform packages ═══ -->
   <ItemGroup>
-    <PackageVersion Include="Novara.Module.SDK"                  Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.SDK"                  Version="2026.4.22.3" />
 
     <!-- Module NuGets — listed here so modules that reference siblings
          (e.g. Gateway referencing every module in NuGetPack mode) don't
          hand-pin. Each module's own csproj still declares its own
          <Version> in the PropertyGroup (that's the package's output
          version, not a dependency). -->
-    <PackageVersion Include="Novara.Module.Activities"            Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Admin"                 Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.AppGateway"            Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Architecture"          Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Artifacts"             Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Agentic"               Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Audit"                 Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.CodeReview"            Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Collaborate"           Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Communicate"           Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Dashboard"             Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.DesignStudio"          Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.DesktopSync"           Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.EnterpriseThinkBoard"  Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Health"                Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Incidents"             Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Infrastructure"        Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Intelligence"          Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Activities"            Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Admin"                 Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.AppGateway"            Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Architecture"          Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Artifacts"             Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Agentic"               Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Audit"                 Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.CodeReview"            Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Collaborate"           Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Communicate"           Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Dashboard"             Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.DesignStudio"          Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.DesktopSync"           Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.EnterpriseThinkBoard"  Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Health"                Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Incidents"             Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Infrastructure"        Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Intelligence"          Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Module.Issues"                Version="2026.4.22.2" />
-    <PackageVersion Include="Novara.Module.KnowledgeBank"         Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Notifications"         Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.PersonalSettings"      Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.PromptStudio"          Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.KnowledgeBank"         Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Notifications"         Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.PersonalSettings"      Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.PromptStudio"          Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Module.Quality"               Version="2026.4.22.2" />
     <PackageVersion Include="Novara.Module.Releases"              Version="2026.4.22.2" />
-    <PackageVersion Include="Novara.Module.Reports"               Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Retrospectives"        Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Reports"               Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Retrospectives"        Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Module.Roadmap"               Version="2026.4.22.2" />
-    <PackageVersion Include="Novara.Module.Rules"                 Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Search"                Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.ThinkBoard"            Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Tracker"               Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Rules"                 Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Search"                Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.ThinkBoard"            Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Tracker"               Version="2026.4.22.1" />
     <PackageVersion Include="Novara.Module.Todo"                  Version="1.0.2" />
-    <PackageVersion Include="Novara.Module.Viber"                 Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Module.Workflows"             Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Module.Viber"                 Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Module.Workflows"             Version="2026.4.22.1" />
 
     <!-- Shell-side NuGets consumed by module DevHost csprojs. Pinned
          explicit (not floating) per CPM philosophy: reproducibility over
@@ -167,17 +167,17 @@
          via distribution/propagate-packages.sh — one line change here,
          every consumer picks up on next restore. Verified against the
          MonoceptOfficial GitHub Packages feed 2026-04-21. -->
-    <PackageVersion Include="Novara.Shell.Gateway"                Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Shell.Gateway"                Version="2026.4.22.3" />
     <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.22.2" />
     <PackageVersion Include="Novara.Modules.Bundle"               Version="2026.4.21.1" />
 
     <!-- Connectors — Novara's outbound adapter modules -->
-    <PackageVersion Include="Novara.Connector.GitHub"             Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Connector.Intelligence"       Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Connector.Jira"               Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Connector.SignalR"            Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Connector.Smtp"               Version="2026.4.21.1" />
-    <PackageVersion Include="Novara.Connector.ViberHub"           Version="2026.4.21.1" />
+    <PackageVersion Include="Novara.Connector.GitHub"             Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Connector.Intelligence"       Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Connector.Jira"               Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Connector.SignalR"            Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Connector.Smtp"               Version="2026.4.22.1" />
+    <PackageVersion Include="Novara.Connector.ViberHub"           Version="2026.4.22.1" />
   </ItemGroup>
 
   <!-- ═══ Third-party production dependencies ═══ -->

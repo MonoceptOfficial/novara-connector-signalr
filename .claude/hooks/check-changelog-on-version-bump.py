@@ -184,7 +184,7 @@ def main() -> int:
         print("", file=sys.stderr)
         print("Fix: add a CHANGELOG.md entry for this release and stage it:", file=sys.stderr)
         print("", file=sys.stderr)
-        print("    ## 2026.4.21.1", file=sys.stderr)
+        print("    ## 26.4.210", file=sys.stderr)
         print("    ### BREAKING / Added / Changed / Fixed", file=sys.stderr)
         print("    - short bullet describing the change", file=sys.stderr)
         print("", file=sys.stderr)

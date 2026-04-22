@@ -1,61 +1,87 @@
-# Versioning — CalVer is the Standard (2026-04-21)
+# Versioning — Novara CalVer Standard (2026-04-22)
 
-Every Novara-authored NuGet package uses **Calendar Versioning** in the format
-`YYYY.M.D.N`. Every non-Novara NuGet (Dapper, Npgsql, Scriban, etc.) stays on
-its upstream version scheme — we don't rewrite the external ecosystem.
-
-This rule is load-bearing. It governs the Central Package Management file
-(`Directory.Packages.props`), every module's output version, customer-facing
-release notes, and the hooks that enforce release discipline.
-
----
-
-## The format
+Every Novara-authored package — NuGet, NPM, or anything else we ship —
+uses ONE format:
 
 ```
-YYYY.M.D.N
-│    │ │ │
-│    │ │ └── Nth release on that day (1, 2, 3 — rarely > 1)
-│    │ └──── Day of month (1-31, NOT zero-padded)
-│    └────── Month (1-12, NOT zero-padded)
-└─────────── Year (4 digits)
+YY.M.DN
+│  │ ││
+│  │ │└── N: release of day (0-9) — MANDATORY, always present
+│  │ └─── D: day of month (1-31, no leading zero)
+│  └───── Month (1-12, no leading zero)
+└──────── Year (2 digits, e.g. 26 = 2026)
 ```
 
-Examples:
-- `2026.4.21.1` — first release on 21 April 2026
-- `2026.4.21.2` — hotfix / second release same day
-- `2026.12.31.1` — a New Year's Eve release
-- `2027.1.1.1` — the first release of the new year (informal "major bump")
+**Parsing rule:** the last digit is always `N`. Everything before it in the
+patch segment is the day. `26.4.110` = April 11 release 0. `26.4.11` =
+April 1 release 1. Never bare without N — N=0 is the first release of any
+day.
 
-NuGet sort order is numeric per segment — `2026.4.21.1 < 2026.4.21.2 < 2026.4.22.1`. Do not zero-pad — `2026.04.21` is technically sortable by NuGet but visually confusing; Novara convention is "no leading zeros on month/day."
+**Examples:**
+- `26.4.220` — first release on 22 April 2026
+- `26.4.221` — same-day hotfix #1
+- `26.4.222` — same-day hotfix #2
+- `26.4.10`  — April 1, first release
+- `26.4.11`  — April 1, first hotfix
+- `26.4.110` — April 11, first release
+- `27.1.10`  — January 1 2027, first release (year boundary = major bump)
+- `26.12.319` — December 31 2026, hotfix 9 (year-end, N-maxed)
+
+**N is capped at 9.** Novara has never released ten times in one day; this
+is a hard cap, not a convention. If you somehow hit 10 same-day releases,
+bump the day forward (`26.4.240` skipping `26.4.23.anything`). The
+CHANGELOG carries the real date.
+
+**Rules for `^` ranges:**
+`^26.4.220` means `>=26.4.220 <27.0.0` — covers all hotfixes same day,
+all future days this year, all future months this year. Year boundary =
+implicit major bump = consumers must retune their pins. This is the entire
+point of CalVer: the version number itself expresses the policy "treat
+year changes as major-compatible-breaks."
 
 ---
 
-## Why CalVer
+## Why one format, one place
 
-Novara ships continuously. 43+ modules moving weekly. For that cadence, semver's `major.minor.patch` discipline is expensive to maintain correctly (teams have to reason about what counts as a breaking change every release) and the **date information is more useful at operational-time**: when a customer or operator sees a version, they should immediately know:
+**Simplicity over local-optimum.** NuGet natively supports 4-segment
+`YYYY.M.D.N` and NPM strictly allows 3-segment only; for most of the last
+year Novara's rules split accordingly — NuGet used 4-seg, NPM used
+`YYYY.M.DN` packed. That split caused drift via copy-propagation: a new
+module created by copying an existing one would inherit whichever format
+the source happened to use.
 
-- **When was this shipped?** — "2026.4.21" tells you April 21.
-- **Is this current?** — glance at today's date.
-- **How old is my Gateway relative to the module?** — subtract the dates.
-- **Which version landed before/after which?** — sort order is chronological.
+Converging on `YY.M.DN` for everything means:
+- Copy-propagate from any module → the new module is correct by default
+- One bump tool handles all package types (`.claude/tools/bump-calver.py`)
+- One regex in the sweep (`.claude/tools/version-sweep.py`)
+- Releases in CHANGELOG, logs, and UI chrome all line up character-for-character
+- Year rollovers at `26 → 27` behave the same for NuGet + NPM consumers
 
-Semver's major-minor signal matters more for libraries with unknown downstream consumers. Novara's consumers are known (modules + known customer deployments) and pinned via Central Package Management. We don't need the signal-via-version-number; we have a CHANGELOG for that.
+**Why YY not YYYY.** Shorter. Matches Ubuntu's 20-year track record (`24.04`,
+`26.04`, etc.). `26` becomes the semver major for range purposes, which
+cleanly expresses "year boundary = breaking-until-proven-safe." The 2100
+collision concern is theoretical — Novara codebases will not exist in their
+current form in 2126. If they do, by then we'll have a migration plan.
+
+**Why N is mandatory.** Without it, `26.4.11` is ambiguous (April 11 vs
+April 1 rel 1). With N always emitted, the format is self-describing:
+reader knows the last character is the release counter, everything before
+is the day. First release of the day = N=0, never bare `YY.M.D`.
 
 ---
 
-## Breaking changes — how we communicate them without a major bump
+## Release discipline
 
-Semver's "1.x → 2.x" forces a conversation. CalVer doesn't. We compensate with discipline:
+Every module that publishes a new version MUST have a corresponding
+`CHANGELOG.md` entry in the same commit. The pre-commit hook
+(`.claude/hooks/check-changelog-on-version-bump.py`) rejects commits that
+bump the csproj `<Version>` or package.json `version` without touching
+`CHANGELOG.md`.
 
-### 1. CHANGELOG.md entry on every release — **pre-commit enforced**
-
-Every module that publishes a new NuGet version MUST have a corresponding `CHANGELOG.md` entry in the same commit. The pre-commit hook (`.claude/hooks/check-changelog-on-version-bump.py`) rejects commits that bump the csproj `<Version>` without touching `CHANGELOG.md`.
-
-### 2. BREAKING marker in the entry
+### BREAKING marker in the entry
 
 ```markdown
-## 2026.4.21.1 — SDK
+## 26.4.220 — SDK
 
 ### BREAKING
 - `Guard.NotFoundException(string)` ctor removed — use `NotFoundException(entity, id)` instead.
@@ -67,19 +93,26 @@ Every module that publishes a new NuGet version MUST have a corresponding `CHANG
 - Dapper CT overloads now honor request cancellation.
 ```
 
-Reviewers reject PRs without this structure. The NuGet `ReleaseNotes` metadata echoes the same.
+### ADR for any SDK breaking change
 
-### 3. ADR for any SDK breaking change
+The SDK is load-bearing for 43+ modules. Any breaking change to
+`Novara.Module.SDK` needs an Architecture Decision Record before it ships
+— see `.claude/architecture/`. The ADR covers: what breaks, who needs to
+update, migration path, rollout plan.
 
-The SDK is load-bearing for 43+ modules. Any breaking change to `Novara.Module.SDK` needs an Architecture Decision Record before it ships — see `.claude/architecture/`. The ADR covers: what breaks, who needs to update, migration path, rollout plan.
+### Year transitions — informal "major bump" moment
 
-### 4. Year transitions — informal "major bump" moment
+January 1 is the natural time to land aggregated non-trivial surface
+changes. Not required, but convention: if you have a big refactor in
+mind, time it to the new year so the year segment acts like a major.
+Jan 1, 2027 versions (`27.1.10`) naturally read as "new generation."
 
-January 1 is the natural time to land aggregated non-trivial surface changes. Not required, but convention: if you have a big refactor in mind, time it to the new year so the year segment acts like a major. Jan 1, 2027 versions (`2027.1.1.1`) naturally read as "new generation."
+### Customer comms
 
-### 5. Customer comms
-
-When a breaking change ships in a particular `YYYY.M.D.N`, the release announcement includes an explicit "Breaking changes in this release" section. Operators reading the release don't need to guess from the version number — the narrative carries the signal.
+When a breaking change ships in a particular `YY.M.DN`, the release
+announcement includes an explicit "Breaking changes in this release"
+section. Operators reading the release don't need to guess from the
+version number — the narrative carries the signal.
 
 ---
 
@@ -90,66 +123,105 @@ When a breaking change ships in a particular `YYYY.M.D.N`, the release announcem
 ```xml
 <PropertyGroup>
   <PackageId>Novara.Module.Roadmap</PackageId>
-  <Version>2026.4.21.1</Version>    <!-- THIS release's version -->
+  <Version>26.4.220</Version>
 </PropertyGroup>
 ```
 
-### In the Directory.Packages.props (central pin for DEPENDENCIES)
+### In the Directory.Packages.props (central pin for dependencies)
 
 ```xml
 <ItemGroup>
-  <PackageVersion Include="Novara.Module.SDK"       Version="2026.4.21.1" />
-  <PackageVersion Include="Novara.Module.Roadmap"   Version="2026.4.21.1" />
+  <PackageVersion Include="Novara.Module.SDK"       Version="26.4.220" />
+  <PackageVersion Include="Novara.Module.Roadmap"   Version="26.4.220" />
   ...
 </ItemGroup>
 ```
 
-These two must stay in sync — when a module's csproj bumps to `2026.4.22.1`, the central file also updates to that number on next `propagate-packages.sh` run.
+### In each NPM `package.json`
+
+```json
+{
+  "name": "@novara/shell-sdk",
+  "version": "26.4.220",
+  "peerDependencies": {
+    "@novara/bug-capture-core": "^26.4.220"
+  }
+}
+```
+
+All three must stay in sync — when a package's output version bumps,
+all consumer references update too. Use
+`.claude/tools/bump-calver.py` to walk the workspace and apply the bump
+uniformly (both `.csproj` and `package.json`, internal deps included).
 
 ---
 
 ## Tooling
 
-### `distribution/propagate-packages.sh`
-Copies the canonical `Directory.Packages.props.template` from `NovaraSDK/distribution/` into every consumer repo (44 targets). Run after editing the template. `--commit` auto-commits per repo.
+### `.claude/tools/bump-calver.py`
+Unified bumper. Computes today's `YY.M.DN`, auto-increments N if today's
+version already exists in any package, rewrites both `package.json` and
+`.csproj` files, updates internal Novara deps to `^YY.M.DN`.
 
-### `distribution/migrate-csprojs-to-cpm.py`
-One-time sweep. Removes `Version="..."` attributes from `<PackageReference>` nodes for packages that are centrally managed. Idempotent.
+```bash
+python3 .claude/tools/bump-calver.py               # dry-run
+python3 .claude/tools/bump-calver.py --apply       # apply
+python3 .claude/tools/bump-calver.py --release 1   # force N=1 for a hotfix
+```
+
+### `.claude/tools/version-sweep.py`
+Drift detection. Inventories every Novara-authored package and exits
+non-zero if any is on semver OR bare `YY.M.D` without N. Suitable for CI.
+
+```bash
+python3 .claude/tools/version-sweep.py
+```
 
 ### `.claude/hooks/check-changelog-on-version-bump.py`
-Pre-commit hook. Rejects any commit that touches `<Version>` in a csproj (package output version) without touching `CHANGELOG.md` in the same commit.
+Pre-commit hook. Rejects commits that bump `<Version>` or package.json
+`version` without touching `CHANGELOG.md`.
+
+### `NovaraSDK/distribution/release-module.sh` / `release.sh`
+Per-repo release scripts. Compute `YY.M.DN` internally, bump csproj +
+changelog, build, pack, publish, propagate central template, commit,
+push. One command per release.
 
 ---
 
 ## FAQ
 
-**Q: What about a legacy module still on semver like `1.7.0`?**
-A: Grandfathered — stays on semver until its next release, at which point it bumps to the current calendar date. Within ~3 months every package should have rolled over.
+**Q: What about legacy modules still on semver like `1.7.0`?**
+A: Grandfathered — stays on semver until its next release, at which point
+it bumps to today's CalVer.
 
-**Q: My dependency is external — does it have to be CalVer too?**
-A: No. External NuGets (Dapper, Npgsql, etc.) use their upstream scheme. Only Novara-authored packages use CalVer. The `Directory.Packages.props` file will have a visible mix — that's expected.
+**Q: My dependency is external (Dapper, Angular, rxjs) — does it have to
+be CalVer too?**
+A: No. External packages use their upstream scheme. Only Novara-authored
+packages (anything with `Novara.` prefix in NuGet, `@novara/` scope in
+NPM) use CalVer. `Directory.Packages.props` will have a visible mix —
+that's expected.
 
-**Q: Can I publish `2026.4.21` (3-segment) without `.N`?**
-A: Technically yes — NuGet accepts both. But always include `.N` so multi-release days aren't awkward. Our convention: always 4 segments.
-
-**Q: How do consumers say "I want the latest 2026 release"?**
-A: With CPM, they don't need to — the central file pins exact. If you're outside CPM and want a range, use `[2026, 2027)` — explicit year bound.
+**Q: Can I publish `26.4.22` (3-segment without N) on NuGet since NuGet
+doesn't require N?**
+A: No. Single Novara standard. Always emit N, even on NuGet. Keeps
+copy-propagation clean.
 
 **Q: What if I genuinely need a semver-style "stable LTS" branch?**
-A: Rare. Use the suffix: `2026.4.21.1-lts.2028` means "LTS branch supported through 2028." NuGet handles pre-release suffixes correctly.
+A: Rare. Use the pre-release suffix: `26.4.220-lts.2028` means "LTS
+branch supported through 2028." NuGet and NPM both handle pre-release
+suffixes correctly.
 
-**Q: Does CalVer break NuGet Gallery tooling?**
-A: No. NuGet has always supported 4-segment versions and arbitrary numeric segments. Tested on GitHub Packages + nuget.org.
+**Q: Does CalVer break NuGet Gallery or npm registry tooling?**
+A: No. Both have always supported arbitrary numeric version segments.
+Tested on GitHub Packages and npmjs.com.
 
 ---
 
-## When this rule was adopted
-
-2026-04-21. Preceded by the 2026-04-21 Prompt Studio SDK consolidation which exposed the pain of chasing version bumps across 22+ stale csprojs. Central Package Management + CalVer both landed same day as a coherent release-management overhaul.
-
-Related files:
+## Related files
 - `.claude/rules/engineering-discipline.md` Gate 6 (build-before-handoff)
 - `.claude/tools/verify-session-builds.sh`
 - `NovaraSDK/distribution/Directory.Packages.props.template`
 - `NovaraSDK/distribution/propagate-packages.sh`
-- `NovaraSDK/distribution/migrate-csprojs-to-cpm.py`
+- `NovaraSDK/distribution/release-module.sh`
+- `.claude/tools/bump-calver.py`
+- `.claude/tools/version-sweep.py`

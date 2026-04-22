@@ -36,7 +36,7 @@ public class SignalRConnector : ConnectorBase
     {
         Id = "connector.signalr",
         Name = "SignalR Hub",
-        Version = "2026.4.22.1",
+        Version = BuildProvenance.ReadVersion(typeof(SignalRConnector).Assembly),
         Author = "Monocept",
         Description = "Internal NovaraSignalRHub — real-time presence + client lifecycle events. Internal gRPC/HTTP transport; no HMAC (trust boundary).",
         Icon = "radio",

@@ -45,12 +45,12 @@ Each module owns its schema. Display name = module ID = DB schema = C# namespace
 
 ## Function Conventions (PostgreSQL)
 - Use `CREATE OR REPLACE FUNCTION {schema}.{name}(...)` — schema = module schema (issues, roadmap, etc.)
-- Parameter names: **`snake_case`** (e.g., `p_user_id`, `p_feature_id`, `p_parent_session_id`) — adopted 2026-04-21, aligns with PG ecosystem. Legacy `p_lowercase` (no-underscore) also works — Dapper's `MatchNamesWithUnderscores=true` bridges both.
+- Parameter names: **`snake_case` MANDATORY** (e.g., `p_user_id`, `p_feature_id`, `p_parent_session_id`). Pre-commit hook `check-sql-param-naming.py` blocks new functions with legacy no-underscore params. See `.claude/rules/sql-conventions.md`.
 - **ID parameters MUST be INT** — `p_user_id INT`, never `p_user_id VARCHAR`
 - **No p_product_id or p_tenant_id** in product DB functions — database IS the product, deployment IS the tenant
 - No `SELECT *` — list specific columns
 - Use `EXISTS` over `COUNT(*) > 0`
-- Function names: `issues.upsert`, `issues.get_by_product` (or `issues.getbyproduct` when extending tables already using no-underscore — local consistency wins)
+- Function names: `issues.upsert`, `issues.get_by_product`. Gateway's introspection-based `BuildPgCall` in `DapperModuleDbContext` calls functions via their exact DB param names (cached from `pg_proc.proargnames`), so callers can send PascalCase C# properties and the right legacy OR snake_case DB param wins. That's the safety net; the convention above is what every new migration must follow.
 
 ## SP/Function ↔ Code Coupling (MANDATORY)
 Every Dapper function call in C# must have an inline comment showing the contract:

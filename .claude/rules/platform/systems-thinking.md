@@ -23,10 +23,18 @@ globs: "**/*"
    - Exception: Novara itself uses direct DB (it's the host)
 
 4. **Version everything**
-   - Agent SDK follows semver
-   - Track which version each product has installed
+   - Novara-authored packages use **CalVer `YYYY.M.D.N`** (adopted 2026-04-21).
+     See `.claude/rules/versioning.md` for the full policy.
+   - External agent SDKs (published to npm / external NuGet feeds) MAY use
+     semver if ecosystem convention demands it — CalVer is strict only for
+     Novara-owned packages on the internal GitHub Packages feed.
+   - Track which version each product has installed.
    - Heartbeat reports version — Novara can alert on outdated agents
-   - Breaking changes require MAJOR version bump + migration guide
+     (age computed as today's date minus the version's date segment).
+   - Breaking changes — no "major bump" in CalVer. Signal via mandatory
+     CHANGELOG.md + `BREAKING:` tag + migration guide. Year boundaries
+     (2026 → 2027) are the informal major-bump moment for aggregated
+     large changes.
 
 5. **Configuration flows from Novara to products**
    - Products register with Novara on startup

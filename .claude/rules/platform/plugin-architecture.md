@@ -29,6 +29,8 @@ Install → OnInstallAsync → OnEnableAsync → (running) → OnDisableAsync �
 
 ## NuGet packaging:
 - Feed: `nuget.pkg.github.com/MonoceptOfficial`
-- Pack: `dotnet pack -c Release -o ./nupkgs`
-- Push: `dotnet nuget push --source ... --api-key ...`
-- Version: Semantic versioning (MAJOR.MINOR.PATCH)
+- Release: `./release.sh "short changelog message"` — one command (preferred)
+- Manual: `dotnet pack -c Release -o ./nupkgs` + `dotnet nuget push --source ... --api-key ...`
+- Version: **CalVer `YYYY.M.D.N`** (2026-04-21 adopted). Breaking change signal
+  via mandatory `CHANGELOG.md` + `BREAKING:` tag, not major-bump. See
+  `.claude/rules/versioning.md` for the full policy.

@@ -1,552 +1,430 @@
 # Architecture Decisions — Novara Platform
 
-These are binding decisions that affect how EVERY feature is built. Follow them in all new code.
+Binding decisions that affect how EVERY feature is built. Follow them in all new code.
+
+**Deployment model context:** Novara ships as a product suite to enterprises. Each enterprise gets its own deployment (one instance per enterprise). Within a deployment, each product has its own database. There is no multi-tenant row-scoping — the deployment IS the tenant boundary. Within an enterprise, BU/Org isolation applies for users and access. See #4, #14, #28.
 
 ## 1. Async-First Design (prep for Event-Driven)
 
-Novara will move to event-driven architecture with a message queue. Until the queue is in place, structure code so the transition is minimal.
+Novara will move to event-driven with a message queue. Structure code so the transition is minimal.
 
 **Rules:**
-- **Never block on long operations in controllers.** If an operation takes >3 seconds (AI calls, report generation, bulk operations), return `202 Accepted` with a tracking ID, process async, notify via SignalR.
-- **Separate command from query.** Read endpoints return data. Write endpoints accept work and return immediately. Don't mix reads and writes in one endpoint.
-- **Service methods should be self-contained.** Each method should take all its inputs as parameters (not fetch from HTTP context). This makes them callable from a queue worker later without refactoring.
-- **Use `CancellationToken` on all async methods.** Pass it through from controller to service to DB. This enables graceful shutdown and timeout handling.
-
-**Pattern for long operations:**
-```csharp
-// Controller: accept and return tracking ID
-[HttpPost("ideas/{ideaId}/ai-analyze")]
-public async Task<IActionResult> AiAnalyze(int ideaId)
-{
-    var trackingId = await _service.QueueAnalysisAsync(ideaId, GetUserId());
-    return Accepted(ApiResponse<object>.Ok(new { TrackingId = trackingId }));
-}
-
-// Service: do the work (today inline, tomorrow from queue)
-public async Task<string> QueueAnalysisAsync(int ideaId, int userId)
-{
-    // Today: run inline with fire-and-forget notification
-    // Tomorrow: publish to queue, worker picks up
-    _ = Task.Run(() => RunAnalysisAsync(ideaId, userId));
-    return Guid.NewGuid().ToString();
-}
-```
-
-**When queue arrives:** Replace `Task.Run` with `queue.PublishAsync()`. Controller and service signatures don't change.
-
-## 2. Cache-Ready Service Layer
-
-Every service call that reads config, permissions, or lookup data should go through a cache-friendly pattern.
-
-**Rules:**
-- **Never call DB for data that changes less than once per hour** without considering cache. This includes: tenant config, permissions, feature flags, system prompts, labels, workflow definitions, roles.
-- **Use the `IMemoryCache` pattern today** (in-process). When Redis arrives, swap the implementation — not every caller.
-- **Cache keys must include TenantId.** Pattern: `tenant:{tenantId}:{entity}:{id}` or `tenant:{tenantId}:{entity}:list`.
-- **Invalidate on write.** When an entity is updated, evict its cache entry. Don't rely on TTL alone for user-facing config.
-- **TTL guidelines:** Permissions = 5 min, tenant config = 10 min, system prompts = 30 min, labels/roles = 15 min.
+- **Never block on long operations in controllers.** If an operation takes >3 seconds, return `202 Accepted` with a tracking ID, process async, notify via SignalR.
+- **Separate command from query.** Read endpoints return data. Write endpoints accept work and return immediately.
+- **Service methods self-contained.** Each method takes all inputs as parameters (not from HTTP context). Callable from a queue worker later without refactoring.
+- **Use `CancellationToken` on all async methods.** Pass through controller → service → DB.
 
 **Pattern:**
 ```csharp
-public async Task<IEnumerable<Permission>> GetPermissionsAsync(int tenantId, int userId)
-{
-    var cacheKey = $"tenant:{tenantId}:permissions:{userId}";
-    if (_cache.TryGetValue(cacheKey, out IEnumerable<Permission> cached))
-        return cached;
-
-    var result = await _db.ExecuteProcedureAsync<Permission>(SpNames.GetUserPermissions, new { TenantId = tenantId, UserId = userId });
-    _cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
-    return result;
+public async Task<IActionResult> AiAnalyze(int ideaId) {
+    var trackingId = await _service.QueueAnalysisAsync(ideaId, GetUserId());
+    return Accepted(ApiResponse<object>.Ok(new { TrackingId = trackingId }));
 }
+// Service: _ = Task.Run(() => RunAnalysisAsync(...)); — today inline, tomorrow queue.PublishAsync()
 ```
+
+## 2. Cache-Ready Service Layer
+
+Every call that reads config, permissions, or lookup data goes through a cache-friendly pattern.
+
+**Rules:**
+- **Never call DB for data that changes <1/hr** without cache. Includes: org config, permissions, feature flags, system prompts, labels, workflow definitions, roles.
+- **Use `IMemoryCache` today** (in-process). When Redis arrives, swap implementation only.
+- **Cache keys scope to product (and org/BU or user where relevant).** Pattern: `product:{pid}:{entity}:{id}` or `product:{pid}:user:{uid}:permissions`.
+- **Invalidate on write.** Don't rely on TTL alone.
+- **TTL:** Permissions 5m, org config 10m, system prompts 30m, labels/roles 15m.
 
 ## 3. Idempotent Write Operations
 
-Every write operation must be safe to call twice with the same input and produce the same result.
+Every write must be safe to call twice with same input → same result.
 
 **Rules:**
-- **All create endpoints must accept an optional `ClientRequestId` (GUID).** If the same request ID arrives twice, return the original result instead of creating a duplicate.
-- **Use UPSERT pattern in SPs** instead of blind INSERT. Check for existence before inserting.
-- **Ingestion endpoints (agent data, telemetry) must deduplicate.** Use composite unique keys (TenantId + Timestamp + Source + Hash).
-- **Never use auto-increment IDs as business identifiers in APIs.** Use DisplayId or encoded IDs for external references.
+- **Create endpoints accept optional `ClientRequestId` (GUID).** Duplicate request ID returns original result, not a new row.
+- **UPSERT pattern in SPs** — check existence before insert.
+- **Ingestion endpoints deduplicate** via composite unique key (Timestamp + Source + Hash + ProductId).
+- **Never expose auto-increment IDs as business identifiers** in APIs. Use DisplayId or encoded IDs externally.
 
-**SP pattern:**
-```sql
--- Check for duplicate before insert
-IF NOT EXISTS (SELECT 1 FROM product.SomeTable WHERE ClientRequestId = @ClientRequestId)
-BEGIN
-    INSERT INTO product.SomeTable (...) VALUES (...);
-END
-SELECT * FROM product.SomeTable WHERE ClientRequestId = @ClientRequestId;
-```
+## 4. BU/Org Isolation Within a Deployment
 
-## 4. Tenant-Scoped Everything
+**Multi-tenant row-scoping is NOT the Novara model.** Each enterprise gets its own deployment (see #14); within that deployment, each product has its own database (see #28). Isolation between enterprises happens at the deployment boundary, not via TenantId filters in queries.
 
-Already in `multi-tenancy.md` but reinforced here: NO database query without TenantId filter. NO service method without tenant context. This is the #1 security requirement.
+**What DOES apply inside a deployment:**
+- **BU/Org isolation** — an enterprise may have multiple business units. `OrgId` exists on product tables and MUST be enforced in every read path where a user's access is BU-scoped. Today this is an enforcement gap (URL manipulation exposes cross-BU data — see BU isolation gap in MEMORY); fix on sight.
+- **ProductId isolation** — each product has its own DB via `ProductDatabaseRouter`; no cross-product queries at the DB layer. Cross-product reads go through `ICrossModuleQuery` / mediator (read-only).
+- **User-owned row visibility** — `CreatedByUserId` + role/permission checks decide whether User A sees User B's records.
+
+**Banned:** adding a new `TenantId` column to any product-DB table. Adding `WHERE TenantId = @TenantId` to any product-DB query. Treating the deployment as if it might serve multiple enterprises — it doesn't.
+
+**Legacy exception:** `novara.rules` and `novara.appgateway` modules use platform DB and retain `TenantId`. Do not copy their pattern to product-DB modules.
+
+See `multi-tenancy.md` for the full model (historical file — retained for Rules/AppGateway context).
 
 ## 5. Contract-First API Design
 
 **Rules:**
-- **Every endpoint must have typed request/response DTOs** in the Contracts project. No anonymous objects, no `dynamic`, no raw dictionaries.
-- **Response envelope is always `ApiResponse<T>`.** Consistent shape for frontend.
-- **Breaking changes require a new API version.** Adding fields is OK. Removing/renaming fields is breaking.
-- **All list endpoints must support pagination.** Use `PaginationParams` (Page, PageSize). Return total count via `COUNT(*) OVER()`.
+- **Typed request/response DTOs** in Contracts project. No anonymous objects, `dynamic`, or raw dictionaries.
+- **Response envelope always `ApiResponse<T>`.**
+- **Breaking changes require a new API version.** Adding fields is OK; removing/renaming is breaking.
+- **All list endpoints paginated** via `PaginationParams`. Return total via `COUNT(*) OVER()`.
 
 ## 6. Resilience by Default
 
-Already in `resilience.md` but the architectural implication:
-- **Every external call (AI, Blob, external webhook) must have a timeout.** Default: 30 seconds for AI, 10 seconds for everything else.
-- **Every external call must have a fallback.** AI down → tell user, don't crash. Blob down → queue for retry.
-- **Circuit breaker on external services.** 3 consecutive failures → open circuit for 60 seconds → half-open probe → close on success.
+See `resilience.md`. Architectural implications:
+- **Every external call has a timeout.** AI: 30s, everything else: 10s.
+- **Every external call has a fallback.** AI down → tell user. Blob down → queue for retry.
+- **Circuit breaker on external services.** 3 failures → open 60s → half-open probe → close on success.
 
 ## 7. Feature Flags Ready
 
-Until the feature flag system is built, use this convention:
-- **Add a `platform.ProductSetting` row** for any feature that might need to be toggled. Key pattern: `feature:{featureName}:enabled`.
-- **Check in service layer, not controller.** Controllers stay thin.
-- **Default to enabled.** If the setting doesn't exist, the feature is on. This prevents new tenants from having everything disabled.
+Until feature flag system is built:
+- **Add a `platform.ProductSetting` row** for toggleable features. Key: `feature:{name}:enabled`.
+- **Check in service layer, not controller.**
+- **Default to enabled.** Missing setting = feature is on. Prevents new deployments from having everything off.
 
 ## 8. Background Work Pattern
 
-Until the job infrastructure is built:
-- **Use `IHostedService` for scheduled work** (stale session cleanup, health checks, usage aggregation).
-- **Log start/end/error of every background operation.** Background failures are invisible without logging.
-- **Never block the main request pipeline** for background work. Fire-and-forget is acceptable today with proper error logging.
+Until job infrastructure is built:
+- **`IHostedService` for scheduled work** (cleanup, health checks, aggregation).
+- **Log start/end/error of every background operation.**
+- **Never block the request pipeline** for background work. Fire-and-forget acceptable with error logging.
 
 ## 9. Demo-Ready vs Production-Ready Balance
 
-Novara needs to demo well AND scale. The rule:
-- **Every feature must work end-to-end** (controller → service → SP → real DB). No mock data, no stubs in demo paths.
-- **Incomplete features should be behind feature flags**, not half-implemented in the main path.
-- **AI features should degrade gracefully.** If Claude API key isn't configured, show "AI features require configuration" — don't crash, don't show mock data.
-- **Prioritize breadth over depth for demos.** A working simple version of 10 features beats a perfect version of 3.
+- **Every feature works end-to-end** (controller → service → SP → real DB). No mock data.
+- **Incomplete features hide behind feature flags**, not half-implemented in the main path.
+- **AI features degrade gracefully.** No API key → "AI features require configuration". Never crash, never show mock.
+- **Breadth over depth for demos.** 10 simple working features > 3 perfect ones.
 
-## 10. Never-Stop Architecture — Business Continuity at Every Layer
+## 10. Never-Stop Architecture — Business Continuity
 
-**The platform must never block the user.** If any dependency fails, the experience degrades gracefully — never crashes, never loses work, never shows a dead end.
+**The platform never blocks the user.** Every dependency failure degrades gracefully — never crashes, never loses work, never dead-ends.
 
-**Rules for every feature:**
-- **Before building, answer:** What happens when this dependency (AI, DB, storage, external service) is unavailable? If the answer is "feature stops working" — add a fallback before shipping.
-- **LLM auto-failover:** Use `LlmGateway` which tries providers in priority order (from `platform.LlmProvider`). If current provider fails → try next. Circuit breaker: 3 consecutive failures → disable provider for 5 min → half-open probe → re-enable on success.
-- **Manual fallback when ALL AI is down:** Every AI-powered action must have a manual alternative. AI Analyze fails → show a structured template the user fills in manually. AI chat fails → let user type their own notes. Never show a dead button.
-- **Storage failover:** Blob upload fails → queue to local disk → sync when restored. Never lose the file.
-- **DB read failures:** Serve from cache with "stale data" warning. Never show empty screen for data that was loaded before.
-- **DB write failures:** Queue locally, retry with backoff. Tell user "Saved locally, will sync." Never lose user work.
-- **Real-time degradation:** SignalR down → polling fallback. Never lose notifications.
-- **Show degradation state:** Amber banner when running on fallback ("Using GPT-4 instead of Claude", "Working offline, will sync"). User must always know what's degraded.
-- **Per-tenant provider priority:** Each tenant can set their preferred LLM order. Novara admin can override globally.
-- **Reprioritization:** Users can drag-and-drop features to reorder. Admin can bulk-change status. Business priorities change — the tool must keep up.
+**Rules:**
+- **Before building:** what happens if this dependency is unavailable? If "feature stops working" — add a fallback before shipping.
+- **LLM auto-failover** via `LlmGateway` (priority list from `platform.LlmProvider`). Circuit breaker: 3 fails → disable 5m → half-open probe.
+- **Manual fallback when ALL AI is down.** AI Analyze fails → structured template user fills in manually. Never a dead button.
+- **Storage failover.** Blob upload fails → queue to local disk → sync when restored.
+- **DB read failures.** Serve from cache with "stale data" banner.
+- **DB write failures.** Queue locally, retry with backoff. "Saved locally, will sync."
+- **Real-time.** SignalR down → polling fallback.
+- **Show degradation state** via amber banner. User always knows what's degraded.
+- **Per-deployment LLM provider priority.** Enterprise admin configures; Monocept ships defaults.
+- **Reprioritization.** Drag-and-drop to reorder. Bulk status changes.
 
 ## 11. Unified Connector Architecture — Everything Outside Gateway Is a Connector
 
-**Every service Novara communicates with — internal or external — goes through the Connectors framework.** No special-cased HTTP clients, no hardcoded service URLs, no module-specific polling logic.
+**Every service Novara communicates with — internal or external — goes through the Connectors framework.** No special-cased HTTP clients, no hardcoded service URLs, no module-specific polling.
 
 **Rules:**
-- **ViberHub, SignalR Hub, SMTP, Ollama are connectors** — same config UI, same health dashboard, same capabilities manifest as GitHub/Jira/PagerDuty. They use `internal-grpc` transport for performance but the same framework for management.
-- **Modules implement `IConnectorHandler`** — the universal SDK interface for receiving events (`HandleEventAsync`), handling action results (`HandleActionResultAsync`), declaring requirements (`GetRequirements`), and declaring outbound actions (`GetOutboundActions`).
-- **No module makes direct HTTP calls to external systems.** All outbound goes through `OutboundActionRequest` → Connectors Engine → Connector Adapter. No exceptions.
-- **No module stores credentials.** Credentials live in AppGateway vault, accessed only by connector adapters.
-- **No module implements polling/scheduling.** The Integration Engine handles all sync scheduling, cursor tracking, backfill, retry, DLQ.
-- **Every connector declares a Capabilities Manifest** — inbound events, outbound actions, config schema, module-specific config schemas. This manifest enables: action validation, config UI rendering, requirement checking, health monitoring.
-- **Two transport tiers:** `internal-grpc` for co-deployed Novara services (fast, direct). `external-rest` for customer tools (resilient with DLQ/retry/circuit-breaker). Module developer uses `IConnectorHandler` either way — transport is transparent.
-- **Module-specific connector config:** Modules contribute config sections to connector instances via `GetModuleConfigSchema()`. Stored in `connector_module_config` table. Rendered as tabs in admin UI.
-- **Graceful degradation is mandatory.** When a connector isn't installed, the consuming module shows "Connect {tool} to enable {feature}" — never crashes, never shows empty data without explanation.
-- **IConnectorHandler is MANDATORY for connector event consumers.** Any module that declares `SubscribedEvents` starting with `connector.*` MUST register an `IConnectorHandler` implementation in `ConfigureServices`. The Gateway validates this at startup — missing handlers produce a WARNING log. Pattern: see `CodeReviewConnectorHandler` (GitHub PR → Review). Handler declares `ModuleId` + `ConnectorTypes`, receives `ConnectorDataEvent`, returns `ConnectorHandlerResult` with created/updated entity IDs.
-- **Connectors are thin adapters, not modules.** A connector implements `ConnectorBase` (manifest, webhook parsing, test connection). Business logic, controllers, DB schemas, and menu items belong in the CONSUMING MODULE, not the connector. A connector should be ~200 LOC. If it has controllers or its own DB schema, it's a module in disguise.
+- **ViberHub, SignalR Hub, SMTP, Ollama are connectors** — same config UI, same health dashboard as GitHub/Jira. `internal-grpc` transport for perf, same framework for management.
+- **Modules implement `IConnectorHandler`** — receives events, handles action results, declares requirements + outbound actions.
+- **No direct HTTP from modules.** All outbound via `OutboundActionRequest` → Connectors Engine → Adapter.
+- **No credentials in modules.** Live in AppGateway vault, accessed only by connector adapters.
+- **No polling/scheduling in modules.** Integration Engine handles sync, cursor tracking, backfill, retry, DLQ.
+- **Every connector declares a Capabilities Manifest** (inbound events, outbound actions, config schema).
+- **Two transport tiers:** `internal-grpc` (co-deployed) vs `external-rest` (customer tools, resilient DLQ/retry/CB). Transparent to module author.
+- **Module-specific connector config** contributed via `GetModuleConfigSchema()`. Stored in `connector_module_config`. Rendered as tabs in admin UI.
+- **Graceful degradation mandatory.** Connector not installed → "Connect {tool} to enable {feature}". Never empty data without explanation.
+- **`IConnectorHandler` MANDATORY for `connector.*` event subscribers.** Gateway validates at startup. Pattern: `CodeReviewConnectorHandler` (GitHub PR → Review).
+- **Connectors are thin adapters, not modules** (~200 LOC). Business logic, controllers, DB schemas belong in consuming module.
 
 ## 12. Federated Intelligence — Data Sovereignty
 
-**Novara NEVER ingests customer business data.** Novara stores metadata, findings, and aggregates. Customer data stays with the customer.
+**Novara NEVER ingests customer business data.** Metadata, findings, aggregates only. Customer data stays with the customer.
 
 **The 4 Data Categories:**
-1. **Novara-Generated Content** — features, issues, designs, KB articles, decisions, workflows, rules. Users create these IN Novara. Novara owns them.
-2. **Novara-Instrumented Telemetry** — data collected by Novara SDKs embedded in customer products (Web Vitals, APM traces, custom events). Customer controls what to instrument and what to scrub. Novara receives pre-processed, PII-scrubbed telemetry.
-3. **Federated Inspector Findings** — findings produced by Novara tools that run AT the customer site (data catalog scans, security scans, log fingerprints, infrastructure metrics). Tools scan locally, push findings. Raw data never crosses.
-4. **Customer Primary Data** — rows, logs, request bodies, source code, files, PII/PHI/PCI. NEVER touches Novara. Stays at customer. Always.
+1. **Novara-Generated Content** — features, issues, designs, KB articles. Users create IN Novara.
+2. **Novara-Instrumented Telemetry** — SDK-collected (Web Vitals, APM, events). Customer controls scrubbing. PII-scrubbed before ingest.
+3. **Federated Inspector Findings** — produced at customer site (catalog/security/infra scans). Raw data never crosses.
+4. **Customer Primary Data** — rows, logs, request bodies, source code, PII/PHI/PCI. NEVER touches Novara.
 
 **Rules:**
-- Every module feature that consumes external data must declare which category it uses
-- No module stores customer database rows, full log streams, source code, or regulated data
-- SDKs must support PII scrubbing configuration (customer controls what's sent)
-- Inspectors must do edge processing (aggregate, fingerprint, classify, scrub) BEFORE sending
-- Compliance (GDPR, HIPAA, PCI) shifts to customer because Novara never holds regulated data
-- This is Novara's competitive moat: the only enterprise platform that doesn't become a data liability
+- Every module feature consuming external data declares its category
+- No module stores customer DB rows, full log streams, source code, or regulated data
+- SDKs support PII scrubbing config (customer-controlled)
+- Inspectors do edge processing (aggregate, fingerprint, scrub) before sending
+- Compliance (GDPR/HIPAA/PCI) shifts to customer — Novara never holds regulated data
+- Novara's competitive moat: the only enterprise platform that doesn't become a data liability
 
 ## 13. Integration Priority — 4 Modes in Order
 
-When a module needs data from outside Novara, use modes in this priority order:
+When a module needs outside data, try modes in priority order:
 
-**Mode 1: CONNECTOR — Read from existing enterprise tools (PRIMARY)**
-- Customer already has Datadog, Sentry, PagerDuty, Jira, GitHub, Snyk, etc.
-- Novara connector pulls aggregates from existing tool's API
-- DO NOT duplicate data that already lives in customer's APM/log/issue tool
-- Novara's value: cross-tool correlation, not tool replacement
+**Mode 1: CONNECTOR** (PRIMARY) — Read from existing enterprise tools (Datadog, Sentry, Jira, GitHub). Don't duplicate data that already lives in customer's APM. Novara's value: cross-tool correlation.
 
-**Mode 2: SDK — Instrument greenfield products (SECONDARY)**
-- For customers without APM tools or for new products
-- Novara's own SDKs: @novara/browser-sdk, Novara.Apm.NET, mobile SDKs, analytics SDK
-- Lightweight, Novara-native telemetry
-- Customer chooses per-product: Mode 1 if Datadog exists, Mode 2 if not
+**Mode 2: SDK** (SECONDARY) — Instrument greenfield products. Novara SDKs: `@novara/browser-sdk`, `Novara.Apm.NET`, mobile, analytics. For customers without APM tools.
 
-**Mode 3: INSPECTOR — Scan on-prem assets (SUPPLEMENTARY)**
-- For assets without APIs: databases, log files, source code, cloud billing exports
-- Novara ships tools that run at customer site: Data Catalog Scanner, Security Scanner, Infrastructure Agent, Database Agent, Log Analyzer, Cost Analyzer
-- Tools scan locally, push findings, never upload raw data
+**Mode 3: INSPECTOR** (SUPPLEMENTARY) — Scan on-prem assets without APIs (databases, logs, source, cloud billing). Scans locally, pushes findings, never uploads raw data.
 
-**Mode 4: UI PLUGIN — Embed Novara views in customer products (UBIQUITY)**
-- Novara provides Web Components: `<novara-issue-lookup>`, `<novara-service-status>`, `<novara-feature-flag>`, etc.
-- Framework bindings for React, Angular, Vue
-- Customer embeds in their support portal, admin panel, internal tools, mobile app
-- Two-way: customer product can also call Novara APIs
+**Mode 4: UI PLUGIN** (UBIQUITY) — Web Components (`<novara-issue-lookup>`, etc.) embedded in customer products. Two-way: customer product can call Novara APIs back.
 
 **Rules:**
-- Every module's "Data Source Requirements" section must declare Mode (1, 2, 3, or 4)
-- Connector (Mode 1) is ALWAYS the first choice — don't reinvent what the market already solved
-- SDKs and Inspectors are Novara's own engineering — specified in novara-sdk-suite and novara-inspector-suite docs
-- UI Plugins are a cross-cutting capability — every module can expose one
+- Every module's "Data Source Requirements" section declares Mode (1/2/3/4)
+- Connector is ALWAYS first choice — don't reinvent what the market solved
+- UI Plugins are cross-cutting — every module can expose one
 
-**Workspace Folder Conventions:**
-- **`NovaraConnectors/`** — Mode 1 adapters. Code runs INSIDE Novara Gateway. Outbound from Novara.
-- **`NovaraTools/sdks/`** — Mode 2 SDKs. Embedded in customer code. Inbound to Novara.
-- **`NovaraTools/inspectors/`** — Mode 3 scanners. Standalone tools at customer site. Inbound to Novara.
-- **`NovaraTools/sdks/novara-ui-components/`** — Mode 4 Web Components. Embedded in customer UIs.
-- **`NovaraTools/`** is the umbrella for EVERYTHING deployed at the customer edge — developers installing SDKs, operators deploying Inspectors, frontends embedding UI components.
-- Each tool is its own mini-project with README, INTEGRATION.md, DATA-CONTRACT.md, SECURITY.md, examples/, and CHANGELOG.md.
-- See `D:\NovaraDev\Workspace\NovaraTools\README.md` for the master index and `DATA-FLOW.md` for data movement.
+**Workspace folders:**
+- `NovaraConnectors/` — Mode 1 (inside Gateway, outbound)
+- `NovaraTools/sdks/` — Mode 2 (in customer code, inbound)
+- `NovaraTools/inspectors/` — Mode 3 (at customer site, inbound)
+- `NovaraTools/sdks/novara-ui-components/` — Mode 4
 
-## 14. Deployment Model — Novara Runs INSIDE Customer Ecosystem
+## 14. Deployment Model — One Deployment Per Enterprise
 
-Novara is NEVER a traditional SaaS where customer data traverses the internet to Monocept.
+**Novara is NEVER a shared SaaS where multiple customers share a database.** Each enterprise gets its own deployment inside their trust boundary.
 
 **Rules:**
-- Novara deploys INSIDE the customer's trust boundary: on-prem, customer's VPC, customer's air-gapped network
-- Intelligence runs on customer's hardware (Ollama on customer GPU, pgvector in customer DB)
-- All data movement — connectors, SDKs, inspectors, UI plugins — happens within customer's network
-- Customer data never leaves customer infrastructure
-- Novara itself can optionally send telemetry to Monocept (opt-in, about Novara's health only, never customer data)
-- Customer owns the deployment, credentials, data retention, access control
-- Air-gapped deployments are first-class: all functions must work without internet access (CVE feeds, LLM models, connector catalogs are importable offline)
-- Updates via signed NuGet packages customer can verify and install
+- Deploys INSIDE customer trust boundary: on-prem, VPC, air-gapped
+- One instance per enterprise — no row-level multi-tenancy, no shared DB
+- Intelligence runs on customer hardware (Ollama on customer GPU, pgvector in customer DB)
+- All data movement happens within customer network — never leaves
+- Novara itself can opt-in telemetry to Monocept (Novara health only, never customer data)
+- Air-gap is first-class: all functions work without internet (CVE feeds, LLM models, connector catalogs importable offline)
+- Updates via signed NuGet packages customer verifies and installs
 
 This is the #1 competitive advantage over cloud-native SaaS (Datadog, LaunchDarkly, Atlassian Cloud).
 
-## 16. Recursion Safety — Polymorphic Dispatchers Declare Categories
-
-**Every polymorphic registry (step executors, tools, event handlers, workflow executors, connector handlers, cross-module handlers) MUST carry a per-member CATEGORY that the dispatching engine filters on before invocation.**
-
-**Rules:**
-- Engines declare which categories they dispatch (hard-coded allowlist in the engine, not a plug-in opt-in)
-- A `foreach` over `registry.All` without a kind/category filter in the loop body is a banned pattern (pre-commit check)
-- Every engine entry point that transitively dispatches plug-ins carries an `AsyncLocal<int>` recursion-depth guard that fails fast at depth > 3
-- Agent session insert-rate is monitored per agent per minute; > 20/min triggers an alert
-
-**Why it matters:**
-On 2026-04-18 a recipe engine without category filtering caused a context-building pass to dispatch a lifecycle step (`agent_loop`), which recursively re-entered the engine with an empty goal — 6 orphan sessions per second for 22 minutes. No compile error, no runtime exception, just a silent flood. This rule makes that class of bug structurally impossible.
-
-**See:** `.claude/rules/recursion-safety.md` for the full pattern, detection logic, and example guardrails. `.claude/rules/learned-errors.md` § RUNAWAY_EMPTY_GOAL_SESSIONS for the specific incident.
-
 ## 15. Workflows as Platform Service — Universal Orchestration Layer
 
-**Every state transition and every approval in Novara goes through `novara.workflows`.** No module implements its own state machine, approval chain, escalation logic, or approval UI. This parallels Decision #11 (Connectors as universal integration) and Decision #12 (Federated Intelligence).
+**Every state transition and every approval goes through `novara.workflows`.** No module implements its own state machine, approval chain, escalation, or approval UI. Parallel to #11 (Connectors) and #12 (Federated Intelligence).
 
 **Rules:**
-- **No custom state machines.** Modules declare workflow definitions; the Workflows engine executes them.
-- **No custom approval UIs.** Use `<novara-approval-card>`, `<novara-approval-queue>` Web Components. One approval UX across the platform.
-- **`IWorkflowParticipant` is mandatory** for any module with state transitions. Parallel to `IConnectorHandler`.
-- **Central Approval Catalog** — every approval type is registered in a master catalog. The Dashboard's "Decisions Queue" aggregates from ALL modules.
-- **Role-based authorization** — Admin module owns the `approval_role_mapping` (per-tenant). A role can approve a set of approval types; customers can override per-tenant.
-- **Delegation is first-class** — user going on vacation → delegates approvals to another user for a date range.
-- **Escalation on timeout** — every approval has an SLA; breach triggers escalation chain.
-- **Break-glass override** — emergency bypass requires double approval + full audit trail.
-- **Workflow-of-workflows** — changing a workflow definition is itself a workflow (requires approval + simulator test + migration of in-flight instances).
-- **Audit trail is append-only** — every approval decision, delegation, escalation is permanently recorded for compliance.
-- **Simulator mode** — test workflow changes on mock data before publishing.
+- **No custom state machines.** Modules declare workflow definitions; engine executes.
+- **No custom approval UIs.** Use `<novara-approval-card>`, `<novara-approval-queue>`.
+- **`IWorkflowParticipant` mandatory** for any module with state transitions. Parallel to `IConnectorHandler`.
+- **Central Approval Catalog** — every approval type registered. Dashboard "Decisions Queue" aggregates from ALL modules.
+- **Role-based auth.** Admin owns `approval_role_mapping` (deployment-configurable, optionally org/BU-scoped).
+- **Delegation first-class** — vacation → delegate to another user for a date range.
+- **Escalation on timeout** — every approval has SLA; breach triggers escalation chain.
+- **Break-glass override** — emergency bypass requires double approval + audit.
+- **Workflow-of-workflows** — changing a workflow def is itself a workflow.
+- **Audit trail append-only.**
+- **Simulator mode** — test workflow changes on mock data before publish.
 
-**Why this matters:**
-- Consistent UX — approvers see the same card whether it's a PR merge, budget overrun, or CVE waiver
-- Single "pending decisions" view for executives — no tool-switching
-- Compliance ready — one audit trail for all approvals across the enterprise
-- Low-code change — customers can modify workflows without waiting for Novara releases
-- No code duplication — 46 modules don't each reinvent state machines
+**Why:** Consistent UX across all approval types. One "pending decisions" view for executives. One audit trail for compliance. Low-code workflow changes without Novara release.
 
-**See also:** Decision #11 (Connectors), #12 (Federated Intelligence), #13 (Integration Priority). Workflows + Connectors + Intelligence are the three universal platform services.
+## 16. Recursion Safety — Polymorphic Dispatchers Declare Categories
+
+**Every polymorphic registry (step executors, tools, event handlers, workflow executors, connector handlers) MUST carry a per-member CATEGORY that the dispatching engine filters on before invocation.**
+
+**Rules:**
+- Engines declare which categories they dispatch (hard-coded allowlist in engine, not plug-in opt-in)
+- `foreach` over `registry.All` without a category filter in the loop body is banned (pre-commit check)
+- Every engine entry point that transitively dispatches plug-ins carries `AsyncLocal<int>` recursion-depth guard, fails fast at depth > 3
+- Agent session insert-rate monitored per agent per minute; > 20/min triggers alert
+
+**Why:** On 2026-04-18 a recipe engine without category filtering dispatched a lifecycle step during context-building, which recursively re-entered the engine — 6 orphan sessions/sec for 22 min. See `learned-errors.md § RUNAWAY_EMPTY_GOAL_SESSIONS`. Full pattern in `.claude/rules/recursion-safety.md`.
 
 ## 17. Composable Dashboard Surfaces — Every Overview Is a Widget Composition
 
-**Every module's overview / landing / dashboard / status page in Novara is a composition of widgets contributed by modules — not hand-built HTML.** Detail / edit / workflow surfaces stay domain-specific. This parallels Decision #11 (Connectors as universal integration), #12 (Federated Intelligence), and #15 (Workflows) — it is the fourth universal platform service, applied to UI composition.
+**Every module's overview/landing/dashboard/status page is a composition of widgets contributed by modules — not hand-built HTML.** Detail/edit/workflow surfaces stay domain-specific. Fourth universal platform service (alongside #11, #12, #15).
 
-**The dividing rule (binding):**
-- Page summarises **multiple data sources at a glance** → widget composition (mandatory).
-- Page deeply interacts with **one entity** (issue editor, design canvas, bug-report wizard, code viewer, settings form) → domain-specific UX (don't force widgets).
+**Dividing rule (binding):**
+- Page summarises **multiple data sources at a glance** → widget composition (mandatory)
+- Page deeply interacts with **one entity** (issue editor, design canvas, settings form) → domain-specific UX
 
 **Rules:**
-- **Every module declares its widget catalogue** in its manifest via `IWidgetProvider.Widgets` — same extension-point shape as menu items, event handlers, and connector types. Widgets are registered at module load; Gateway aggregates.
-- **Widget is the atomic unit**, not "card". Each widget declares: id, kind, title, default size (12-col grid units), min size, config schema (JSON schema), data contract, required sources, required permissions.
-- **Layout is JSON, not code.** Pages are `{ grid, widgets:[{type,x,y,w,h,config}] }` — diffable, exportable, Git-friendly, version-controllable. Same model Grafana uses, battle-tested for a decade. Ship default, org default, team layout, personal layout — resolution chain with reset-to-default.
-- **Data flows through resolvers, not direct DB calls.** Widgets declare a `DataContract` (e.g., `signal:telemetry.app.crash.count_1h`); server-side resolvers fetch. Widget code is pure render — never talks to storage. Swap underlying store (hot Postgres → pre-aggregated rollup → cached) without touching widgets.
-- **Three render states are mandatory.** Populated (data present) / empty (configured but no data in window) / unavailable (source not configured — shows install CTA). No widget returns 404 or blank. Unavailable-state renders the customer education — "Install `novara-infra-k8s` to see this" — never dead UI.
-- **Edit mode is a toggle.** Drag handles, resize corners, add-widget palette, per-widget config gear — invisible in view mode. One "Customize dashboard" button flips. Save As… offers Personal / Team / Org default / Ship default (admin only).
-- **Scope of saved layouts:** `ship > org > team > user`, resolution order opposite. Admin can promote a personal layout to team or org default with one click.
-- **Six standard widget kinds ship in `@novara/ui-kit`** at launch: KPI, chart, table, heatmap, timeline, markdown. New widget kinds go through ui-kit PR, not per-module reinvention.
-- **Never build bespoke grid engines.** Use `angular-gridster2` as the standard for Shell UI. One battle-tested drag/resize framework, not 46 variations.
-- **Widget catalogue and layout changes are auditable.** Every contributed widget, every promoted layout, every shipped default goes through `novara.audit` — same append-only trail as workflow definitions (#15) and connector configs (#11).
-- **Connector + Widget are siblings.** Both are module-contributed descriptors feeding a shared runtime. Module authors learn one pattern ("declare your extensions in your manifest, the framework composes the surface") applied to I/O (connectors) and UI (widgets). This is the **Novara Extension Point family**: Connectors (#11), Workflow Participants (#15), Widgets (#17), Cross-Module Handlers. One mental model.
-- **Descriptors are code-declared, DB-mirrored; instance config + layouts are DB-only.** The `WidgetDescriptor` (the *type* — what widgets exist) lives in the module's code; on module install the Gateway syncs it into `widget_catalog`. The DB copy is for fast querying (add-widget palette, marketplace browse) and versioning, never the source of truth. Instance config (one user's tuning for one widget on one dashboard) and layout JSON are pure DB. Same separation as connector manifests (type is code; instances are data) in Decision #11.
-- **Widget sources are tiered**, matching the connector marketplace pattern: Tier-1 **module-declared** (code, shipped signed, 99% of widgets, full render power); Tier-2 **admin-authored** (DB rows, use existing widget kinds like markdown / table-from-query / chart-from-query, no new render code); Tier-3 **third-party/marketplace** (signed bundles, sandboxed render, phase-2 alongside connector marketplace). Customers add tier-2 widgets *without* a module redeploy.
-- **Descriptor schema evolution follows `settings-discipline.md` rules**: never remove a field, widen only, deprecate before remove. Module upgrades use the same blue-green mechanism as Decision #22 (Module Lifecycle) — v2 descriptors live alongside v1 until layouts migrate; orphaned instances render as placeholders with a migrate-or-remove CTA (never silently disappear).
+- **Every module declares its widget catalogue** via `IWidgetProvider.Widgets` in its manifest. Registered at module load; Gateway aggregates.
+- **Widget is the atomic unit.** Declares: id, kind, title, default size (12-col grid), min size, config schema, data contract, required sources, permissions.
+- **Layout is JSON, not code.** `{ grid, widgets:[{type,x,y,w,h,config}] }` — diffable, exportable, Git-friendly. Grafana model.
+- **Data flows through resolvers.** Widgets declare `DataContract` (e.g., `signal:telemetry.app.crash.count_1h`); server-side resolvers fetch. Widget code is pure render.
+- **Three render states mandatory:** populated / empty (configured, no data) / unavailable (not configured — shows install CTA). No 404s, no blank.
+- **Edit mode is a toggle.** Drag handles, resize, add-widget palette, per-widget config gear — invisible in view mode.
+- **Layout scope:** `ship > deployment > org/BU > team > user`, resolution opposite. Admin promotes personal → team/org default one click.
+- **Six standard widget kinds** in `@novara/ui-kit`: KPI, chart, table, heatmap, timeline, markdown. New kinds via ui-kit PR.
+- **Use `angular-gridster2`** — one battle-tested drag/resize, not 46 variations.
+- **Auditable** — widget catalogue + layout changes go through `novara.audit`.
+- **Connector + Widget are siblings.** Module-contributed descriptors feeding a shared runtime. One mental model across the Extension Point family (Connectors #11, Workflows #15, Widgets #17, Cross-Module Handlers).
+- **Descriptors: code-declared, DB-mirrored. Instance config + layouts: DB-only.** Type lives in code; Gateway syncs to `widget_catalog` on install.
+- **Three tiers:** Tier-1 module-declared (code, signed, full render). Tier-2 admin-authored (DB rows, reuse existing kinds, no new render code). Tier-3 third-party marketplace (signed, sandboxed, phase-2).
+- **Schema evolution follows `settings-discipline.md`** — never remove, widen only, deprecate before remove. Blue-green per #22.
 
-**Why it matters:**
-Today every module reinvents its own cards. 33 Workspace modules + TelemetryHub + future Hubs × ~3 overview surfaces each = 100+ hand-built fixed layouts. Personas differ — SRE wants one cut, CISO another, product lead a third — one-size-fits-none is the current state. Enterprises ask for customisation in every single deal; we ship a rebuild every time. Composable surfaces turn this from an N² problem into an N one — build the framework once, every new module (and every new customer view, every new persona) is free.
-
-This also unlocks the **third-party widget marketplace** downstream: partners and customers contribute widgets to modules they don't own, same mechanism as connector marketplace (#11). One registry, multiple authors.
-
-**Migration approach (progressive, never big-bang):**
-1. Build the framework once (`WidgetDescriptor` SDK + `novara.dashboards` module + `<DashboardShell>` in ui-kit).
-2. Classify every existing module's surfaces as *overview* vs *detail*. Two engineers, one afternoon.
-3. Migrate **TelemetryHub pages first** — newest, wireframe demo already in flight, lowest-risk validation surface.
-4. Workspace overview pages migrate one per sprint (Dashboard, Health, Reports, Incidents, Audit, Releases, ThinkBoard, Roadmap).
-5. **Detail/edit surfaces never migrate.** Design Studio, Code Review, Bug Studio wizard, settings forms stay custom. That's by design.
-6. Every **new module from this decision forward ships its overview as a widget composition by default** — no more hand-rolled HTML in `module-*.html` for dashboard surfaces.
-
-**See:** `specs/Telemetryhub/56-composable-surfaces.html` for the full contract (`WidgetDescriptor`, `ILayoutResolver`, `IWidgetDataResolver`), the 6 standard widget kinds, the layout JSON schema, scope-resolution algorithm, edit-mode UX spec, and per-surface migration inventory. Sibling to `42-shell-and-modules-architecture.html` — both describe platform-primitive composition patterns.
+**Why:** 33 Workspace modules × ~3 overview surfaces = 100+ hand-built layouts. Personas differ (SRE, CISO, PM) — enterprises ask for customisation every deal. Composable surfaces turn an N² problem into an N one.
 
 ## 18. Event-Driven Core — Every Cross-Module Signal Is a Versioned Event
 
-**Every significant state change, cross-module notification, and lifecycle action in Novara is a published event on a durable bus.** No direct module-to-module calls for state-change notification — publish an event, let interested consumers subscribe. The event catalogue is versioned; events never break backward compatibility silently.
+**Every state change, cross-module notification, and lifecycle action is a published event on a durable bus.** No direct module-to-module calls for state-change notification. Event catalogue is versioned.
 
 **Rules:**
-- **One bus, one contract.** `IEventBus.PublishAsync` + `IEventSubscriber.HandleAsync`. Backed by PostgreSQL LISTEN/NOTIFY for small deployments, Kafka for medium+, transparent to the module author.
-- **Every event is a typed class** in the SDK (namespace `Novara.Events.*`), versioned via `[EventVersion(1)]` attribute. Consumers handle N and N-1 simultaneously.
-- **Every event carries: event-id (idempotency key), correlation-id (trace linkage), tenant-id, product-id, actor, timestamp.** These are part of the envelope, not the payload — common across every event.
-- **Well-Known Event Catalogue** maintained in `SdkEventCatalog.md`. Adding an event is a PR that updates the catalogue. Naming: `novara.{module}.{entity}.{verb}` (e.g., `novara.issues.issue.created`, `novara.releases.release.promoted`).
-- **At-least-once delivery.** Consumers are idempotent on `event-id`. The platform does not promise exactly-once; consumers handle duplicates.
-- **Durability level per event**: `ephemeral` (fire-and-forget, small deployments OK to lose), `durable` (bus persists until delivered), `replayable` (bus retains for N days, late-joining consumer can catch up).
-- **No synchronous cross-module notification calls.** If Module A needs Module B to act, it publishes an event; B subscribes. Direct HTTP calls are for queries (`ICrossModuleQuery`), not state changes.
-- **Schema registry** — event classes + JSON Schema autogenerated into the SDK's published NuGet. Consumers that fall behind a producer get a clear compile-time warning.
-- **Dead-letter queue** for unhandled or rejected events — inspected by `novara.health`, alerted on depth > threshold.
-- **Event-sourced state is an optional consumer pattern** — modules that want to replay history (audit, incidents, retrospectives) can subscribe to `replayable` events and rebuild state. Not mandatory.
+- **One bus, one contract.** `IEventBus.PublishAsync` + `IEventSubscriber.HandleAsync`. Backed by PG LISTEN/NOTIFY for small, Kafka for medium+. Transparent to module author.
+- **Every event is a typed class** in SDK (`Novara.Events.*`), versioned via `[EventVersion(1)]`. Consumers handle N and N-1.
+- **Every event carries envelope:** event-id (idempotency), correlation-id, product-id, org-id (where applicable), actor, timestamp.
+- **Well-Known Event Catalogue** in `SdkEventCatalog.md`. Adding an event = PR updates catalogue. Naming: `novara.{module}.{entity}.{verb}`.
+- **At-least-once delivery.** Consumers idempotent on `event-id`.
+- **Durability per event:** `ephemeral` / `durable` / `replayable` (retained N days for late-joining consumers).
+- **No synchronous cross-module notification calls.** Direct calls are for queries (`ICrossModuleQuery`), not state changes.
+- **Schema registry** auto-generated into SDK NuGet. Falling behind producer = compile-time warning.
+- **Dead-letter queue** for unhandled/rejected — inspected by `novara.health`, depth alerts.
+- **Event-sourced state is optional consumer pattern** — audit/incidents/retrospectives subscribe to `replayable` and rebuild state.
 
-**Why it matters:**
-Without a durable event bus, every new cross-module feature requires another direct HTTP dependency. In a 33-module platform, that's N² coupling — catastrophic beyond a few releases. Event-driven inverts the dependency: producers don't know their consumers; consumers subscribe freely. Adding a new consumer (e.g., a new audit sink, a new analytics module, a customer's own event consumer) is a zero-touch change to the producer.
-
-**See:** `specs/platform/novara-events-spec.html`.
+**Why:** Without a durable bus, every cross-module feature adds an HTTP dependency. N² coupling in a 33-module platform is catastrophic.
 
 ## 19. Identity & Permissions as Platform Service — RBAC + ABAC + Delegation + Break-Glass
 
-**Every authenticated request in Novara resolves identity + permissions through one platform service.** No module implements its own role model, permission checks, delegation, or escalation. Modules declare what they need; the platform decides who can do it.
+**Every authenticated request resolves identity + permissions through one platform service.** No module implements its own role model, permission checks, delegation, or escalation.
 
 **Rules:**
-- **Two complementary models**: RBAC (role → permissions) for coarse structure; ABAC (attribute-based policy) for fine-grained rules (e.g., "user can edit their own issues but not others'"). Together in one resolver.
-- **Every module declares its permission catalogue** in its manifest (`IPermissionProvider.Permissions`). Module authors never hard-code permission strings; permissions are descriptors with IDs, descriptions, risk levels.
-- **`[RequirePermission("X")]`** on every mutation endpoint — binding from day one. Read endpoints optional but recommended for sensitive data.
-- **Delegation is first-class**: "User A delegates approval authority to User B from 2026-05-01 to 2026-05-14." Stored on the Identity module; every permission check walks the delegation chain.
-- **Break-glass**: emergency override requires double approval + full audit. Non-revocable log. Reserved for incident response.
-- **Time-bound permissions**: grants expire. `user → role` assignments optionally carry `valid_until`. Reduces standing privilege.
-- **Permission changes are audit events** (#18): every grant, revoke, delegate, break-glass emits `novara.identity.permission.*` events to the durable bus.
-- **Customer tenant overrides** — customer admin can redefine which role maps to which Novara permissions. Novara ships defaults; customers tune.
-- **Service accounts are first-class identities** (CI bots, inspectors, connectors). Tenant-scoped API keys with revocation. Same permission model as users.
-- **Session model**: JWT for API, Cookie for UI, mTLS for inter-module calls (zero-trust). Never a shared secret; never a long-lived key in config.
-
-**Why it matters:**
-Every enterprise rewrites its identity model at least twice during a platform's life — the first time when the shipping-default roles don't match theirs, the second time when they realise their first rewrite painted them into a corner. Building RBAC + ABAC + delegation + break-glass from day one + customer-tunability + auditability means zero rewrites. The 33 modules never need to know any of this exists beyond a single attribute.
-
-**See:** `specs/platform/novara-identity-spec.html`.
+- **Two models:** RBAC (role → permissions) for coarse structure; ABAC (attribute-based policy) for fine-grained (e.g., "user can edit own issues; BU admin can edit any in their BU"). Together in one resolver.
+- **Every module declares its permission catalogue** in manifest (`IPermissionProvider.Permissions`). No hard-coded permission strings — descriptors with IDs, descriptions, risk levels.
+- **`[RequirePermission("X")]`** on every mutation endpoint. Read endpoints optional but recommended for sensitive data.
+- **Delegation first-class:** "User A delegates to User B 2026-05-01 to 2026-05-14." Every check walks delegation chain.
+- **Break-glass:** emergency override = double approval + full audit. Non-revocable log.
+- **Time-bound permissions:** grants expire via `valid_until`. Reduces standing privilege.
+- **Permission changes are audit events** (#18).
+- **Deployment-level role overrides** — enterprise admin redefines role → permission mapping. Novara ships defaults; customer tunes per deployment.
+- **Service accounts are first-class** (CI bots, inspectors, connectors). Deployment-scoped API keys with revocation.
+- **Session model:** JWT for API, Cookie for UI, mTLS for inter-module (zero-trust).
 
 ## 20. Configuration Hierarchy as Platform Service — Resolution Chain, Not Per-Module Code
 
-**Every setting in Novara resolves through one hierarchy: `default → tenant → product → team → user`.** Modules declare their settings; platform handles storage, resolution, caching, audit. No module re-implements this.
+**Every setting resolves through one hierarchy: `default → deployment → org/BU → product → team → user`.** Modules declare; platform handles storage, resolution, caching, audit.
 
 **Rules:**
-- **One resolver.** `IModuleSettings.GetAsync<T>(key, scope)`. Walks the chain most-specific to least-specific, returns first hit.
-- **Every setting has a descriptor** (`SettingField` — already in the SDK via `settings-discipline.md`). Type-safe, range-validated, audited.
-- **Four scopes, resolution order user > team > product > tenant > default.** Team scope optional per module.
-- **Changes are audit events** — every write lands in `novara.audit`, immutable. Auditor can prove which value was in effect at any past moment.
-- **Caching per-scope** with invalidation on write. Read-heavy; 5-min default TTL.
-- **Schema evolution rules** (from `settings-discipline.md` — promoted here): never remove a field, never tighten bounds, never change type silently. Deprecate first, remove in next major.
-- **Customer admins tune at product and tenant scope** through the Admin UI, generated from the declared `SettingField` list. No bespoke settings pages per module.
-- **Secrets go through AppGateway vault**, referenced by key, never stored inline. Same resolution chain; value masked on read.
-- **Bulk import/export** per product as signed JSON — customers can version-control their tuning in their own Git.
-
-**Why it matters:**
-Settings proliferate faster than any other surface. Without a single hierarchy, every module invents its own defaults/overrides pattern and customers drown in N inconsistent admin UIs. With one resolver + one descriptor model, customers tune Novara through one coherent experience and modules get enterprise-grade settings governance for free.
-
-**See:** `specs/platform/novara-config-spec.html` + existing `.claude/rules/settings-discipline.md`.
+- **One resolver:** `IModuleSettings.GetAsync<T>(key, scope)`. Walks most-specific to least, first hit wins.
+- **Every setting has a descriptor** (`SettingField` — see `settings-discipline.md`). Type-safe, range-validated, audited.
+- **Six scopes**, resolution user > team > product > org/BU > deployment > default. Team and org/BU optional per module.
+- **Changes are audit events** — immutable. Auditor can prove which value was in effect at any past moment.
+- **Caching per-scope** with invalidation on write. 5-min default TTL.
+- **Schema evolution:** never remove, never tighten bounds, never change type silently. Deprecate first.
+- **Enterprise admins tune at deployment, org/BU, and product scope** via generated Admin UI. No bespoke settings pages per module.
+- **Secrets via AppGateway vault** — referenced by key, masked on read.
+- **Bulk import/export** as signed JSON per product — enterprises can Git-version their tuning.
 
 ## 21. Outbound Events / Webhooks as Platform Service — One Way to Talk to the World
 
-**When Novara needs to tell the outside world something — Slack, Jira, PagerDuty, ServiceNow, customer webhook, email — it goes through the Outbound Events platform service.** No module implements its own webhook dispatcher.
+**When Novara talks to the outside — Slack, Jira, PagerDuty, ServiceNow, webhook, email — it goes through the Outbound Events service.** No module implements its own webhook dispatcher.
 
 **Rules:**
-- **One outbound service.** `IOutboundEventDispatcher.SendAsync(OutboundEvent e)`. Platform handles: target registration, payload signing, retries with exponential backoff, circuit breakers, dead-letter, audit.
-- **Every outbound subscription is a first-class entity** in the Admin UI: target URL/integration, event filter (by event type, by tenant, by severity), transform template (mapping Novara event → target format), secret/HMAC key, retry policy.
-- **Built-in target types**: generic HTTPS webhook, Slack, Teams, PagerDuty, Jira, ServiceNow, GitHub, GitLab, email via SMTP, signed payload POST. New target types are modules (same `IConnectorHandler` pattern as inbound connectors).
-- **Payload signing**: Ed25519 signature header on every outbound request. Customers verify; proves the event originated from their Novara.
-- **At-least-once delivery** with idempotency key per event. Retry schedule: 1s, 5s, 30s, 5m, 30m, 2h, 12h, 24h, DLQ.
-- **Observability**: every dispatched outbound event is a row in `outbound_delivery_log` (sender, target, attempts, status, response). Admin UI shows throughput, failure rate, per-target health.
-- **Customer-defined outbound subscriptions live under the customer's tenant**; platform-defined (e.g., built-in PagerDuty for SLO breach) are ship defaults tunable per customer.
-- **Rate-limiting per target** — respect customer's Slack/PagerDuty quota; back-pressure if needed.
-- **Same connector framework as inbound.** Outbound is just another direction. Module authors don't learn two abstractions.
-
-**Why it matters:**
-Enterprises don't just want to USE Novara — they want Novara plugged into their existing operational plane. The CIO's demand is always "events flowing to our Slack / PagerDuty / Jira within 30 seconds." Retrofitting each module with its own outbound logic breaks that in month 2; one platform service solves it in week 1 and stays solved.
-
-**See:** `specs/platform/novara-webhooks-spec.html`.
+- **One service:** `IOutboundEventDispatcher.SendAsync(OutboundEvent e)`. Platform handles: target registration, signing, retries with backoff, circuit breakers, DLQ, audit.
+- **Every subscription is a first-class entity** in Admin UI: target, event filter, transform template, secret/HMAC key, retry policy.
+- **Built-in targets:** generic HTTPS webhook, Slack, Teams, PagerDuty, Jira, ServiceNow, GitHub, GitLab, SMTP, signed POST. New targets = modules (same `IConnectorHandler` pattern).
+- **Payload signing:** Ed25519 header. Customers verify.
+- **At-least-once delivery** with idempotency key. Retry: 1s, 5s, 30s, 5m, 30m, 2h, 12h, 24h, DLQ.
+- **Observability:** every dispatched event → `outbound_delivery_log` (sender, target, attempts, status, response).
+- **Subscriptions scoped to deployment** (optionally narrowed to product or org/BU). Platform-defined targets (e.g., built-in PagerDuty for SLO breach) are ship defaults, enterprise-tunable.
+- **Rate-limiting per target** — respect customer Slack/PagerDuty quotas.
+- **Same framework as inbound connectors.** Outbound is just another direction.
 
 ## 22. Module Lifecycle & Versioning — Install, Upgrade, Hot-Swap, Rollback, Safe-Mode
 
-**Every Novara module has a declared lifecycle managed by the platform, not bespoke per-module deploy scripts.** Customers install, upgrade, rollback, and hot-swap modules through one UI backed by one process.
+**Every module has a declared lifecycle managed by the platform, not bespoke deploy scripts.** Customers install, upgrade, rollback, hot-swap through one UI.
 
 **Rules:**
-- **Every module carries a `ModuleManifest`** — id, semver version, dependencies (other modules, SDK version), migrations list, rollback metadata, signing.
-- **Five lifecycle stages**: `install → enable → run → disable → uninstall`. Each has hooks (`OnInstallAsync`, `OnEnableAsync`, etc.) the module author can implement.
-- **Blue-green module upgrades** — new version installed alongside old; customer gates over via Admin UI; old kept for rollback window. No downtime.
-- **Module migrations are idempotent and reversible where possible.** Up/down scripts versioned, tracked in `productmeta.migration_log`. Never auto-applied without customer confirmation on major upgrades.
-- **Safe-mode boot** — if a module crashes the Gateway, next boot loads it in quarantine; Admin UI surfaces the error and allows rollback without full redeploy.
-- **Dependency resolution** — module declares `[DependsOn("novara.workflows", ">=2.0")]`. Gateway refuses to start if unsatisfied; Marketplace surfaces incompatible modules at install time.
-- **Signed bundles** — every module package signed by Monocept release key + customer's installation is audit-logged. Air-gap customers import signed `.nupkg` bundles through the same flow as online installs.
-- **Module version compatibility matrix** — every release declares compatible SDK versions + compatible sibling-module versions. Published in the manifest + marketplace.
-- **Deprecation window**: a module declared deprecated continues to load for N=2 minor versions, warning on every boot. Hard-removed in the next major.
-- **Customer-written modules** follow the same contract — no separate "first-party vs customer" lifecycle. One model.
-
-**Why it matters:**
-Ten-year platforms install and uninstall modules dozens of times. Without a lifecycle contract, each module's install story is bespoke, each upgrade is terrifying, and rollback is "restore last night's backup." With a formal lifecycle + blue-green + safe-mode, a customer upgrades 46 modules on a Tuesday morning with confidence.
-
-**See:** `specs/platform/novara-module-lifecycle-spec.html` + existing `specs/platform/novara-migration-framework-spec.html`.
+- **Every module carries a `ModuleManifest`** — id, CalVer (`YYYY.M.D.N`), dependencies, migrations, rollback metadata, signing.
+- **Five lifecycle stages:** `install → enable → run → disable → uninstall`. Hooks: `OnInstallAsync`, `OnEnableAsync`, etc.
+- **Blue-green upgrades** — new version alongside old; customer gates over via Admin UI; old kept for rollback window. Zero downtime.
+- **Migrations idempotent and reversible.** Up/down scripts versioned, tracked in `productmeta.migration_log`. Cross-year upgrades require confirmation.
+- **Safe-mode boot** — module crashes Gateway → next boot quarantines; Admin UI surfaces error + rollback without redeploy.
+- **Dependency resolution:** `[DependsOn("novara.workflows", ">=26.4.10")]` (Novara CalVer `YY.M.DN` per `versioning.md`). Gateway refuses start if unsatisfied.
+- **Signed bundles** by Monocept release key. Installation audit-logged. Air-gap imports same flow.
+- **Compatibility matrix** — every release declares compatible SDK + sibling-module versions.
+- **Deprecation window:** deprecated module loads for 2 calendar quarters with boot warning. Hard-removed at next year boundary.
+- **Customer-written modules** follow same contract. No "first-party vs customer" split.
 
 ## 23. Observability Contract — Every Module Emits Standard Health, Metrics, Traces
 
-**Every module in Novara emits its own health signal, metrics, and traces through one standard contract.** The platform aggregates; `novara.health` renders. No module goes dark; no bespoke monitoring per module.
+**Every module emits health signal, metrics, traces through one contract.** Platform aggregates; `novara.health` renders.
 
 **Rules:**
-- **Every module implements `IHealthCheck`** — returns `healthy | degraded | down` + structured reason + last-successful-operation timestamp. Queried by `novara.health` every 30s.
-- **Every module emits standard metrics**: requests-per-second, error-rate, P50/P95/P99 latency, queue depth (if applicable), db-query-count. Via OpenTelemetry meter provider, same names across all modules.
-- **Every module produces traces** — spans on every incoming request + outgoing DB call + outgoing connector call. Sampled at configured rate. OTLP export to local collector.
-- **Correlation IDs propagate** through every call. Inherited from incoming request; passed through outgoing events (via #18) and cross-module calls.
-- **Structured logs only** — JSON log lines with `{ts, level, correlation_id, module, tenant, product, event, attrs}`. No free-form `_logger.LogInformation("{data}")` without schema.
-- **Readiness vs liveness** distinct. Readiness = "ready to accept traffic"; liveness = "not deadlocked". Kubernetes-compatible.
-- **SLOs per module** — module declares its own SLOs (P95 latency target, error-rate target). Automatically surfaced in Workspace Health dashboard.
-- **Sampling controls** — platform admin can tune trace sampling per module, per tenant, per environment. Default 10%; 100% for errors always.
-- **No PII in logs, metrics, traces.** Same scrubber as TelemetryHub (#12). Violations fail pre-commit.
-- **Meta-telemetry loop** — the observability infrastructure itself emits health signals. Prometheus exporter for metrics; OTel collector for traces; dashboards in Grafana (or the same `<DashboardShell>` from #17).
-
-**Why it matters:**
-When a module silently breaks in production at 3am, the on-call's first question is "is this module even supposed to be healthy?" Without a contract, the answer is module-specific archaeology. With one contract, every module has the same health surface, the same metric names, the same trace structure — and the 3am triage is fast.
-
-**See:** `specs/platform/novara-observability-spec.html`.
+- **`IHealthCheck` on every module** — returns `healthy | degraded | down` + structured reason + last-success timestamp. Queried every 30s.
+- **Standard metrics:** RPS, error-rate, P50/P95/P99 latency, queue depth, db-query-count. OpenTelemetry, same names across modules.
+- **Traces:** spans on every incoming request + outgoing DB + outgoing connector. Sampled. OTLP export.
+- **Correlation IDs propagate** through every call (incoming → events #18 → cross-module).
+- **Structured logs only** — JSON `{ts, level, correlation_id, module, product, org, event, attrs}`. No free-form `LogInformation("{data}")`.
+- **Readiness vs liveness distinct.** K8s-compatible.
+- **SLOs per module** — declared by module, surfaced in Health dashboard.
+- **Sampling controls** — admin tunes per module/product/env. Default 10%; 100% for errors.
+- **No PII in logs/metrics/traces.** Same scrubber as #12. Violations fail pre-commit.
+- **Meta-telemetry loop** — observability infra emits its own health signals.
 
 ## 24. Data Lifecycle & Retention Contract — Every Module Declares How Its Data Ages
 
-**Every table, every blob, every log in Novara has a declared retention, export format, and RTBF (right-to-be-forgotten) behaviour.** No module silently keeps data forever; none invents its own retention.
+**Every table, blob, log has declared retention, export format, and RTBF behaviour.** No module keeps data forever; none invents its own retention.
 
 **Rules:**
-- **Every table has a `DataDescriptor`** (declared in migration or via attribute): retention duration by tier (hot/warm/cold/archive), export-includable, RTBF-user-scoped, tenant-scoped.
-- **Four storage tiers, platform-wide semantics**: hot (queryable, full fidelity) → warm (rollups, queryable) → cold (compressed archive, restore-only) → forever (audit, append-only, never aged).
-- **Tier transitions are platform-driven** — module declares "hot = 7d, warm = 90d, cold = 365d"; platform runs the jobs.
-- **Export per tenant** — `GET /api/tenants/{id}/export` returns signed bundle of everything scoped to that tenant, across all modules. GDPR Article 20.
-- **RTBF per user** — `DELETE /api/tenants/{id}/users/{userId}/data` cascades across every module's tables that declared the user-scope. Platform orchestrates; modules respond.
-- **Retention is tunable per tenant** — customer may extend (never shorten below Novara's compliance minimum). Ship defaults meet regulatory floor.
-- **Cold tier format is standardised** — Parquet on object store with consistent partitioning (`tenant/module/date.parquet`). One reader can restore anything.
-- **Cross-module joins over cold tier** use the same partition scheme — analytics queries work against archive without per-module special-casing.
-- **Audit of retention actions**: every tier transition, every RTBF, every export emits events to #18 and rows to `novara.audit`.
-- **Backup/restore orthogonal to retention** — retention is about aging live data; backup is about disaster recovery. Both declared per module.
-
-**Why it matters:**
-Three years in, every enterprise platform drowns in data. Without per-module retention declared up-front, cleanup becomes a cross-team six-month project. Compliance auditors want one place to prove "here's every piece of user data we hold, here's how long we hold it, here's how we forget." One contract, zero surprise.
-
-**See:** `specs/platform/novara-data-lifecycle-spec.html`.
+- **Every table has `DataDescriptor`** (migration or attribute): retention by tier, export-includable, RTBF-user-scoped, product-scoped.
+- **Four tiers:** hot (queryable, full fidelity) → warm (rollups, queryable) → cold (compressed archive, restore-only) → forever (audit, never aged).
+- **Tier transitions platform-driven** — module declares "hot=7d, warm=90d, cold=365d"; platform runs jobs.
+- **Export per deployment and per product.** `GET /api/products/{id}/export` → signed bundle across all modules for that product. GDPR Article 20 via per-product export.
+- **RTBF per user:** `DELETE /api/users/{userId}/data` cascades across modules declaring user-scope.
+- **Retention tunable per deployment** (and optionally per product) — extend yes, shorten below compliance floor no. Ship defaults meet regulatory floor.
+- **Cold tier standardised:** Parquet on object store, partitioned `product/module/date.parquet`. One reader restores anything.
+- **Cross-module joins over cold tier** use same partition scheme.
+- **Audit everything** — tier transitions, RTBF, exports → events (#18) + `novara.audit`.
+- **Backup ≠ retention** — retention ages live data; backup is DR. Both declared per module.
 
 ## 25. API Contract Evolution — Versioning, Deprecation, Sunset
 
-**Every externally-consumed API in Novara follows one contract-evolution protocol**: version explicit, deprecation window declared, sunset enforced. No module silently breaks a field name.
+**Every externally-consumed API follows one protocol: version explicit, deprecation declared, sunset enforced.**
 
 **Rules:**
-- **URL versioning** — `/api/v{major}/...`. N and N-1 supported simultaneously for minimum 12 months after N+1 ships.
-- **Field additions are always safe.** Never remove or rename a field on an existing version; introduce in a new version.
-- **Breaking changes require**: new version, deprecation notice on old version (HTTP header `X-Deprecated: true, sunset: 2027-01-01`), migration guide published in KB, customer notification via outbound event (#21).
-- **Response headers surface the contract state** — every response carries `X-Novara-Api-Version: 1.4.2` and optional `X-Deprecated`, `X-Sunset`.
-- **OpenAPI spec auto-generated** on every build. CI diffs against last release's spec; breaking changes fail the build unless accompanied by a version bump + migration guide.
-- **Consumer-driven contract tests** in the SDK — the published SDK includes tests the customer runs against a new Novara deployment before upgrading. Breaking changes surface pre-deploy.
-- **Sunset is a scheduled operation**, not "whenever we get around to it." Calendar entry, customer notification, grace period, then hard-removed.
-- **Internal module-to-module APIs** follow a simpler contract (`ICrossModuleQuery`, `IEventBus` events). Same principles: never break silently, versioned, deprecation supported.
-- **SDK evolution mirrors API evolution** — the `.NET` SDK version tracks the API major. Customer upgrading from SDK 2.x to 3.x is a major event with a migration guide.
-- **Anti-corruption layer** — connectors normalise external (customer-side) API shapes into Novara's internal shape. When the external API changes, only the connector adapts; internal consumers unaffected.
+- **URL versioning** — `/api/v{major}/...`. N and N-1 supported ≥12 months after N+1 ships.
+- **Field additions always safe.** Never remove/rename on an existing version.
+- **Breaking changes require:** new version, `X-Deprecated: true, sunset: 2027-01-01` header on old, migration guide in KB, customer notification (#21).
+- **Response headers surface contract state:** `X-Novara-Api-Version: 26.4.210` (Novara CalVer `YY.M.DN`). URL `/api/v1` stays semver-style for URL stability.
+- **OpenAPI auto-generated** every build. CI diffs against last release; breaking change fails build unless URL-major bump + CHANGELOG + guide.
+- **Consumer-driven contract tests** in SDK — customer runs against new Novara pre-deploy. Breaking changes surface early.
+- **Sunset scheduled**, not ad hoc. Calendar entry, notification, grace period, hard-remove.
+- **Internal module APIs** (`ICrossModuleQuery`, `IEventBus`) — same principles, simpler mechanics.
+- **SDK uses CalVer** (`YYYY.M.D.N`). Year-boundary = informal "major" moment. Mid-year breaking still requires CHANGELOG BREAKING + ADR.
+- **Anti-corruption layer** — connectors normalise external API shapes to Novara's internal shape. External change → only connector adapts.
 
-**Why it matters:**
-The fastest way to lose customer trust is to silently break their integration. The fastest way to get stuck is to never break anything. The middle path is explicit: version, deprecate, migrate, sunset. Platforms that succeed for 10 years all do this; platforms that fail never do.
+## 26. Internationalisation & Localisation — Every String, Date, Number, Currency
 
-**See:** `specs/platform/novara-api-evolution-spec.html`.
-
-## 26. Internationalisation & Localisation Contract — Every String, Date, Number, Currency
-
-**Every user-visible string, date, number, currency, timezone reference in Novara goes through the i18n platform service.** No module hard-codes language or locale assumptions.
+**Every user-visible string, date, number, currency, timezone goes through the i18n service.**
 
 **Rules:**
-- **Every user-facing string is a resource key**, not a literal. Modules declare their strings in `i18n/en-US.json` (plus translations). No `<h1>Release Health</h1>` — always `<h1>{{ 'module.releases.title' | t }}</h1>`.
-- **Supported locales declared platform-wide** — Novara ships en-US baseline; customer installs add locales. Translations live in module packages and override-able per tenant.
-- **Dates default to ISO-8601** in storage, localised at render. User timezone preference resolves through the config hierarchy (#20).
-- **Numbers localised with `Intl.NumberFormat`** — thousand separators, decimal points differ per locale.
-- **Currencies carry currency code** always (never "1000" without knowing if it's USD or EUR). ISO 4217 everywhere.
-- **Plural rules via CLDR** — not module-specific if-else. `{count, plural, one {# issue} other {# issues}}`.
-- **Text direction (LTR/RTL)** honoured in every layout — Arabic, Hebrew deployments work out of the box.
-- **Sortable where human-readable** — sort by normalised form (collation), not raw bytes. German umlauts, Chinese pinyin, accents — all correct.
-- **Translation workflow** — each string has a translator note; missing translations fall back to en-US with a visible `[untranslated]` tag in dev mode, silent fallback in prod.
-- **Module authors never hard-code a language**. Code review blocks literal strings in user-facing surfaces. Enforced by lint rule.
+- **Every user-facing string is a resource key**, not a literal. Modules declare in `i18n/en-US.json` + translations.
+- **Supported locales declared platform-wide.** Ships en-US; customer installs add locales. Deployment-overridable.
+- **Dates stored ISO-8601**, localised at render. User timezone via config hierarchy (#20).
+- **Numbers via `Intl.NumberFormat`.**
+- **Currencies carry ISO 4217 code** always.
+- **Plurals via CLDR** — `{count, plural, one {# issue} other {# issues}}`. Not if-else.
+- **LTR/RTL honoured** in every layout.
+- **Sort by normalised form** (collation) — German umlauts, Chinese pinyin, accents correct.
+- **Missing translations fall back to en-US** with `[untranslated]` tag in dev, silent in prod.
+- **Lint rule blocks literal strings** in user-facing surfaces.
 
-**Why it matters:**
-Every enterprise platform that doesn't bake in i18n from day one rewrites it in year 3 at 10× the cost. Novara's first non-English customer is inevitable; the only question is whether we greet them with "it works" or "give us six months". The strings-are-keys discipline is free to maintain once the lint rule fires on PR, and saves the year-3 rewrite.
+**Why:** Platforms that don't bake in i18n rewrite it in year 3 at 10× cost. First non-English customer is inevitable.
 
-**See:** `specs/platform/novara-i18n-spec.html`.
+## 27. Multi-Region / Data Residency — Where Data Lives Is Declared, Not Accidental
 
-## 27. Multi-Region / Data Residency Contract — Where Data Lives Is Declared, Not Accidental
-
-**Every piece of data in Novara has a declared residency: which customer region it lives in, never leaves.** Data residency is enforced at the platform level, not negotiated per deployment.
+**Every deployment has a declared region; data never leaves it.** For customers operating in multiple regions, a deployment can have per-product region placement.
 
 **Rules:**
-- **Tenant declares its primary region** at creation — `us-east-1`, `eu-west-1`, `ap-south-1`, or an on-prem zone. Immutable without explicit migration.
-- **Every data write is region-tagged** in the envelope. Platform enforces: write to a tenant's data outside its region is rejected with 451 Legal Reasons.
-- **Cross-region reads only via explicit federation** — the customer admin opts in to a cross-region view (e.g., a US parent viewing EU subsidiary rollups). Federation happens at the aggregate level; raw rows never cross.
-- **Deployment topology** — Novara can run multi-region with one shared control plane + region-local data planes. Gateway routes by tenant → region.
-- **Data-sovereignty laws baked into defaults**: GDPR (EU data in EU), China's PIPL, India's DPDP, UAE data localisation — each has a shipped policy pack the customer enables.
-- **Backups are region-local** by default. Cross-region replication requires explicit admin opt-in + audit event.
-- **Air-gap is the strongest residency** — no data leaves the customer's network, ever. Inspectors/SDKs push inside; Workspace consumes inside; outbound only via signed quarterly export if the customer chooses.
-- **Regional health is separate** — a region going down doesn't degrade other regions. Bulkheads at the region boundary.
-- **Customer can audit residency** — `GET /api/tenants/{id}/residency-report` lists every module, every table, the region each row lives in. GDPR auditor's dream.
-- **Region move is a first-class operation** — not a manual migration. Tenant admin triggers, platform orchestrates copy + switchover + verification + old-region purge.
-
-**Why it matters:**
-Data residency is bet-the-deal in regulated geographies. An enterprise customer in Germany asking "where does my data live?" cannot be answered with "probably in us-east-1, we think." Declaring residency up-front and enforcing it at the platform layer means one lawyer reads one spec and signs off on all 46 modules at once.
-
-**See:** `specs/platform/novara-data-residency-spec.html`.
+- **Deployment declares primary region** at install — `us-east-1`, `eu-west-1`, `ap-south-1`, or an on-prem zone. Immutable without explicit migration.
+- **Every data write is region-tagged** in the envelope. Platform enforces: write outside the deployment's region → 451 Legal Reasons.
+- **Cross-region reads only via explicit federation** — enterprise admin opts in (e.g., US parent viewing EU subsidiary rollups). Federation at aggregate level; raw rows never cross.
+- **Multi-region deployment topology** — one control plane + region-local data planes. Gateway routes by product → region.
+- **Data-sovereignty policy packs:** GDPR (EU), PIPL (China), DPDP (India), UAE localisation. Customer enables per deployment.
+- **Backups region-local by default.** Cross-region replication = opt-in + audit event.
+- **Air-gap is strongest residency** — no data leaves ever. Outbound only via signed export if customer chooses.
+- **Regional health isolated** — region down doesn't degrade others.
+- **Customer audits residency:** `GET /api/deployments/{id}/residency-report` lists every module/table/region.
+- **Region move is a first-class operation** — enterprise admin triggers, platform orchestrates copy + switchover + verification + old-region purge.
 
 ## 28. Per-Product Isolation — Every Product Is Its Own Blast Radius
 
-**Within a Novara deployment, every product gets its own isolated environment: its own database, its own connectors, its own resource quotas, its own retention policies, its own audit trail.** A noisy product cannot drown a quiet one; a compromised product cannot reach siblings; a product can be deleted or exported cleanly without touching the rest. This is distinct from tenant-scoped data (#4) and deployment-model (#14): those are about *where data lives*; this is about *how blast radius is contained within a deployment*.
+**Within a deployment, every product gets its own isolated environment:** own database, own connectors, own resource quotas, own retention, own audit trail. Distinct from deployment-model (#14) — that's *where data lives across enterprises*; this is *how blast radius is contained within one enterprise's deployment*.
 
 **Rules:**
-- **Database per product.** Each product gets its own PostgreSQL database (`NovaraWorkspaceProductDB_{productKey}`, `NovaraTelemetryProductDB_{productKey}`). The `ProductDatabaseRouter` resolves the connection per request. A product's schema, extensions, indexes, retention, even PG version are independent of siblings.
-- **Bulkhead at the connection pool.** Each product gets its own `pgBouncer` pool with its own max-connections quota. One product cannot exhaust the server's connection budget.
-- **Resource quotas per product** — events/sec ingest, storage GB, query CPU-seconds/min, worker concurrency. Breaches trigger 429s *on that product only*, never spill to others.
-- **Connector instances are product-scoped.** Datadog / Sentry / Prometheus connector configs live at the product level. Product A's Datadog account is invisible to Product B. Credentials never shared.
-- **Signal families enabled per product.** Product A may have Application family only; Product B has Application + Infrastructure; Product C adds Cost. Enabling a family on one product doesn't enable it elsewhere.
-- **Retention policies per product.** Product A (regulated) keeps 7 years; Product B (internal tool) keeps 30 days. Decision #24 applies per product, not per deployment.
-- **Audit trail is product-scoped.** `audit.log` table lives in each product's DB. Cross-product audit views exist for platform admins, explicit opt-in only.
-- **Quotas and rate limits are enforced at the ingest gateway.** Every event carries a `product_id`; gateway routes to the product's bus partitions, checks the product's quotas. Work for Product A cannot be delayed by Product B's queue depth.
-- **Deletion is atomic and clean.** `DELETE /api/products/{id}` drops the product DB, archives its object-store data per retention, revokes its connector credentials, unwinds its entries from shared catalogues (widget_catalog, connector_catalog). One transaction, one audit entry, no orphans.
-- **Export is independent.** A customer offboarding Product A gets a complete export bundle (PostgreSQL dump + object-store tarball + signed manifest + audit trail) that a new deployment can re-hydrate. Products B and C are untouched.
-- **Cross-product federation is explicit opt-in**, never implicit. An executive wanting "all products dashboard" goes through the Workspace cross-product view which queries each product DB read-only through the router; products never query each other directly.
-- **Compute is optionally product-scoped at larger tiers.** At XL tier (per spec 57 §13.4), noisy products can get dedicated processing workers + dedicated Kafka consumer groups to fully isolate CPU and memory. Small/Medium tiers share compute but isolate data.
+- **Database per product.** `NovaraWorkspaceProductDB_{productKey}`. `ProductDatabaseRouter` resolves per request. Schema, extensions, indexes, retention, even PG version independent.
+- **Bulkhead at connection pool.** Each product = own `pgBouncer` pool with own max-connections. No deployment-wide exhaustion.
+- **Resource quotas per product:** events/sec, storage GB, query CPU-seconds/min, worker concurrency. Breach → 429s on that product only.
+- **Connector instances product-scoped.** Datadog/Sentry/Prometheus configs at product level. Credentials never shared.
+- **Signal families per product.** Product A = Application only; B = Application + Infra; C adds Cost.
+- **Retention per product.** Regulated product = 7yr; internal tool = 30d.
+- **Audit trail product-scoped** (`audit.log` in product DB). Cross-product views for platform admins, opt-in.
+- **Ingest enforces quotas.** Every event carries `product_id`; gateway routes to product partitions, checks quotas.
+- **Deletion atomic and clean.** `DELETE /api/products/{id}` drops product DB, archives per retention, revokes credentials, unwinds shared-catalogue entries.
+- **Export independent.** Offboard Product A → complete bundle (PG dump + object store + manifest + audit) re-hydratable in a new deployment. B/C untouched.
+- **Cross-product federation opt-in**, never implicit. Executive "all products" view via read-only router queries.
+- **Compute optionally product-scoped at XL tier.** Noisy products get dedicated workers + Kafka consumer groups. S/M tiers share compute, isolate data.
 
-**Why it matters:**
-Tenants are *customers*; products are *what a customer ships*. A customer might run 5 products — mobile app, web app, admin portal, partner portal, internal dashboard — and the one with a misbehaving SDK generating 100× noise cannot be allowed to degrade the others. Without per-product isolation, Product A's release-day spike throttles Product B's on-call dashboard. With per-product isolation, each product is effectively its own mini-Novara — the customer buys one platform and gets N independent products inside it.
+**Why:** A misbehaving SDK on Product A cannot degrade Product B. Per-product economics (showback/chargeback to internal product teams) become trivial. DR: product-scoped backups and restores.
 
-This also makes the per-product economics clean: customer ops can attribute CPU, storage, ingest bandwidth, compute cost to each product (Decision #24 helps with this at the data layer; this decision makes it architecturally supportable). Showback/chargeback to internal product teams becomes trivial.
-
-For disaster recovery, per-product isolation means backups are product-scoped, restore is product-scoped, corruption in one product's DB doesn't require restoring the whole deployment.
-
-**Relationship to other decisions:**
-- **#4 Tenant-Scoped Everything** — still holds within each product. Every row in every product DB has a TenantId (where relevant). Tenant isolation is row-level within a product DB; product isolation is database-level within a deployment.
-- **#14 Deployment Model** — one deployment = one customer. Inside that deployment, products are the second level of isolation.
-- **#27 Multi-Region / Data Residency** — a product's data lives in the product's declared region. Two products in the same customer can live in different regions if the customer operates globally.
-- **#24 Data Lifecycle & Retention** — retention policy is per-product. A customer may elect different retention for different products.
-- **Spec 57 (Scaling)** — at Medium+ tier, product-scoped resources become first-class. At XL, products can have dedicated fleets.
-
-**See:** `specs/platform/novara-per-product-isolation-spec.html` (to write) + existing CLAUDE.md "Per-Product DB Architecture" section (this decision formalises what's already built).
+**Relationships:**
+- **#4 BU/Org Isolation** — within a product, `OrgId` and user permissions gate row visibility. Product isolation is DB-level; BU isolation is row-level within a product.
+- **#14 Deployment Model** — one deployment = one enterprise. Products = second level of isolation within that deployment.
+- **#27 Data Residency** — a product's data lives in the deployment's declared region (or its own if multi-region placement is configured).
+- **#24 Data Lifecycle** — retention declared per product.

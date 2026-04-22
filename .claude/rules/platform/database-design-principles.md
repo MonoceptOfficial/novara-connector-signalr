@@ -82,38 +82,49 @@ Novara is designed to scale to massive data volumes and potentially microservice
 - `collab` schema is RETIRED — does not exist
 - Never create objects in `dbo` schema for Novara features
 
-## 11. Naming Convention — snake_case (adopted 2026-04-21)
+## 11. Naming Convention — snake_case MANDATORY (2026-04-22)
 
-**Use standard PostgreSQL `snake_case`** for column names, SP parameter names, table names.
+**Use `snake_case` everywhere.** Not "prefer", not "both styles coexist" —
+it is the only convention.
 
-✅ `parent_session_id`, `is_enabled`, `created_at_utc`, `content_type`
-✅ SP params: `p_user_id`, `p_parent_session_id`
+✅ Columns:   `parent_session_id`, `is_enabled`, `created_at_utc`, `content_type`
+✅ SP params: `p_user_id`, `p_feature_id`, `p_parent_session_id`
 ✅ Functions: `agent_ops.claim_next_spec_item`
+✅ Tables:    `feature_work_item`, `agent_session`
 
-**Why:**
-- Matches PostgreSQL ecosystem norms (Django, Rails, SQLAlchemy, Supabase, Postgres docs).
-- Matches the `snake_case` already used in ~half the Novara schema
-  (`agent_ops.dispatch_queue`, `spec_batch_item`, `agent_maturity_stats`,
-  `session_event`, etc.).
-- Matches what Claude and human devs naturally write — eliminates
-  cross-session drift.
-- The Dapper safety net (`Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true`
-  in `DapperModuleDbContext` static ctor) bridges snake_case DB columns to
-  PascalCase C# properties automatically — `parent_session_id` → `ParentSessionId`
-  with zero friction.
+### Enforcement (three gates)
 
-**Legacy `no-underscore` convention (pre-2026-04-21) — retired:**
-- Existing tables like `agent_ops.catalog.isenabled`, `agent_ops.session.agentname`
-  continue to work — Dapper handles both styles. No renames required.
-- New code: prefer snake_case. Matching an existing table's style when extending
-  it is also fine (local consistency wins over global uniformity).
+1. **Pre-commit hook** — `.claude/hooks/check-sql-param-naming.py` blocks any
+   new `CREATE FUNCTION` with legacy params. Runs on every commit that
+   touches `migrations/*.sql`.
+2. **Gateway introspection** — `BuildPgCall` in `DapperModuleDbContext` +
+   `DapperPlatformDbContext` queries `pg_proc` at call time, adapts C#
+   PascalCase to the SP's actual param names. Guarantees the Gateway can
+   call snake_case AND any legacy functions still lingering in the DB.
+3. **Startup validator** (WARN → HARD-FAIL) — Gateway boot verifies every
+   `SpNames.*` constant resolves to a live function. Planned Phase 4.
 
-**Root-cause note:** the previous `lowercase-no-underscore` rule was born from
-a 2026-04-15 bug where Dapper's default column→property mapping silently
-dropped underscore columns to default values. The rule was a workaround
-picked alongside the real fix (enabling `MatchNamesWithUnderscores` globally).
-Once the safety net shipped the same day, the rule was obsolete but stayed.
-Retired here.
+### Canonical vocabulary
+
+`NovaraSDK/distribution/pg-param-dictionary.json` holds ~300 compound splits
+(`userid → user_id`, `featureid → feature_id`, …) and ~145 atomic words that
+pass through unchanged. Adding a new compound = append an entry, run
+`./distribution/propagate-rules.sh all` to sync module repos.
+
+### History
+
+The old `lowercase-no-underscore` convention (pre-2026-04-21) was a workaround
+for a 2026-04-15 Dapper mapping bug that was fixed the same day via
+`MatchNamesWithUnderscores = true`. The workaround outlived its reason, then
+mutated into a 54-function "drifter bomb" class (name has `_`, params don't)
+that triggered runtime 42883 errors. The 2026-04-22 sweep converted ~700
+functions to snake_case (88%) and replaced the brittle Gateway heuristic with
+runtime introspection. Remaining legacy-param functions still work via
+introspection but no new ones may be introduced.
+
+See `.claude/rules/sql-conventions.md` for the full convention, the sweep
+tool at `.claude/tools/sweep-module-params.py`, and the ADR at
+`.claude/architecture/2026-04-22-sp-calling-convention-adr.md`.
 
 ## Automated Enforcement
 - `platform.CheckParameterTypeMismatches` SP runs as part of database health checks

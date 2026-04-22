@@ -2,7 +2,7 @@
 
 This rule is binding for **every release of every Novara package**, whether
 initiated by a human developer, a CI workflow, or Claude Code. Releases are
-the one operation that's irreversible — once `Novara.Module.X 2026.4.21.1`
+the one operation that's irreversible — once `Novara.Module.X 26.4.210`
 is on the NuGet feed, it stays there forever. Getting this right matters.
 
 ---
@@ -155,7 +155,7 @@ further if the manual step becomes painful.
 CalVer's one-way-door property means you can't republish a version you
 published 30 seconds ago with a fix. To roll back:
 
-1. Ship a NEW release (`2026.4.21.2`) that reverts / fixes.
+1. Ship a NEW release (`26.4.211`) that reverts / fixes.
 2. Update CHANGELOG entry noting what the rollback addressed.
 3. Consumers update via `git pull`.
 

@@ -45,7 +45,7 @@ Once two customers are running different versions, API compatibility matters.
 - Adding fields to responses is non-breaking
 - Removing/renaming fields is breaking → requires `/api/v2/...`
 - Support N and N-1 simultaneously (v1 and v2 both active)
-- Version header in responses: `X-Novara-Api-Version: 1.4.2`
+- Version header in responses: `X-Novara-Api-Version: 26.4.210` (Novara CalVer `YY.M.DN` — see `.claude/rules/versioning.md`). The URL segment (`/api/v1`) stays semver-style because URLs must be stable; the header carries the release date.
 
 **Rule for new endpoints:** Every new endpoint goes in v1 unless it breaks an existing contract.
 

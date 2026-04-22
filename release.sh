@@ -111,20 +111,27 @@ if [[ -z "$PACKAGE_ID" || -z "$CURRENT_VERSION" ]]; then
 fi
 
 # ─── Compute next version ──────────────────────────────────────────
-# Format: YYYY.M.D.N  (no zero-padding on month/day, per rules/versioning.md)
-TODAY_Y="$(date +%Y)"
-TODAY_M="$(date +%-m 2>/dev/null || date +%m | sed 's/^0//')"   # no leading zero
-TODAY_D="$(date +%-d 2>/dev/null || date +%d | sed 's/^0//')"
-TODAY_PREFIX="${TODAY_Y}.${TODAY_M}.${TODAY_D}"
+# Format: YY.M.DN — unified Novara CalVer (see rules/versioning.md)
+#   YY = last 2 digits of year
+#   M  = month, no leading zero
+#   D  = day, no leading zero
+#   N  = release-of-day (0-9, always present — packed into patch with D)
+# Parsing: last char of patch segment = N, rest = day.
+TODAY_YY="$(date +%y | sed 's/^0//')"                           # 26
+TODAY_M="$(date +%-m 2>/dev/null || date +%m | sed 's/^0//')"   # 4
+TODAY_D="$(date +%-d 2>/dev/null || date +%d | sed 's/^0//')"   # 22
 
-if [[ "$CURRENT_VERSION" =~ ^${TODAY_PREFIX}\.([0-9]+)$ ]]; then
-    # Already released today — bump the Nth segment.
+# If CURRENT_VERSION already matches today's YY.M.D{N}, increment N.
+if [[ "$CURRENT_VERSION" =~ ^${TODAY_YY}\.${TODAY_M}\.${TODAY_D}([0-9])$ ]]; then
     n=$((${BASH_REMATCH[1]} + 1))
-    NEW_VERSION="${TODAY_PREFIX}.${n}"
+    if (( n > 9 )); then
+        echo "error: N=9 already consumed today (${CURRENT_VERSION}). Bump day forward or wait." >&2
+        exit 1
+    fi
 else
-    # First release today — start at .1
-    NEW_VERSION="${TODAY_PREFIX}.1"
+    n=0
 fi
+NEW_VERSION="${TODAY_YY}.${TODAY_M}.${TODAY_D}${n}"
 
 # ─── Precondition: GITHUB_TOKEN unless --skip-publish ──────────────
 if [[ "$skip_publish" == false ]] && [[ -z "${GITHUB_TOKEN:-}" ]]; then
@@ -162,7 +169,7 @@ if [[ ! -f "$CHANGELOG" ]]; then
     cat > "$CHANGELOG" <<EOF
 # ${PACKAGE_ID} — CHANGELOG
 
-All notable changes. Format: CalVer \`YYYY.M.D.N\`. Newest first.
+All notable changes. Format: Novara CalVer \`YY.M.DN\`. Newest first.
 
 ---
 

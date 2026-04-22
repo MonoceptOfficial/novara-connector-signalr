@@ -36,7 +36,7 @@ public class SignalRConnector : ConnectorBase
     {
         Id = "connector.signalr",
         Name = "SignalR Hub",
-        Version = "1.0.0",
+        Version = "2026.4.22.1",
         Author = "Monocept",
         Description = "Internal NovaraSignalRHub — real-time presence + client lifecycle events. Internal gRPC/HTTP transport; no HMAC (trust boundary).",
         Icon = "radio",

@@ -20,3 +20,6 @@ Thumbs.db
 
 # Secrets (use appsettings.json for defaults, Development.json for overrides)
 host/appsettings.Development.json
+
+# Claude Code per-user permission state — never commit
+.claude/settings.local.json

@@ -167,8 +167,8 @@
          via distribution/propagate-packages.sh — one line change here,
          every consumer picks up on next restore. Verified against the
          MonoceptOfficial GitHub Packages feed 2026-04-21. -->
-    <PackageVersion Include="Novara.Shell.Gateway"                Version="2026.4.22.3" />
-    <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.22.2" />
+    <PackageVersion Include="Novara.Shell.Gateway"                Version="2026.4.22.4" />
+    <PackageVersion Include="Novara.Shell.UI"                     Version="2026.4.22.3" />
     <PackageVersion Include="Novara.Modules.Bundle"               Version="2026.4.21.1" />
 
     <!-- Connectors — Novara's outbound adapter modules -->

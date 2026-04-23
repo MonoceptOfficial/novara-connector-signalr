@@ -209,7 +209,48 @@ else:
 PY
 echo "✓ Updated CHANGELOG.md"
 
-# ─── 3. Build ──────────────────────────────────────────────────────
+# ─── 3. Build module's web/ federation remote (if present) ────────
+# Why: csproj embeds web/dist/<module>/browser/** into the nupkg under
+# contentFiles/any/any/wwwroot/modules/<module>/. If we skip this, the
+# nupkg carries either an empty wwwroot or stale artifacts from a prior
+# build — consumers see federation entries declaring a @novara/shell-sdk
+# version that no longer matches the source. Bug: 2026-04-22 half-CalVer
+# release where only csproj versions bumped and the web step was skipped.
+WEB_DIR="$REPO/web"
+WORKSPACE_ROOT="$(cd "$REPO/../.." && pwd)"
+if [[ -d "$WEB_DIR" ]] && [[ -f "$WEB_DIR/angular.json" ]] && [[ -f "$WEB_DIR/federation.config.js" ]]; then
+    echo "→ Building web federation remote..."
+    # npm workspaces hoist @novara/shell-sdk + @novara/ui-kit to the
+    # workspace root's node_modules. If that's missing the symlink chain
+    # won't resolve and the remoteEntry will declare stale versions.
+    if [[ ! -d "$WORKSPACE_ROOT/node_modules/@novara" ]]; then
+        echo "  · npm install at workspace root (first run)..."
+        if ! (cd "$WORKSPACE_ROOT" && npm install --ignore-scripts --no-audit --no-fund >/tmp/release-npm-install.log 2>&1); then
+            echo "✗ npm install failed. See /tmp/release-npm-install.log tail:"
+            tail -20 /tmp/release-npm-install.log
+            git -C "$REPO" checkout -- "$primary_csproj" "$CHANGELOG" 2>/dev/null
+            exit 2
+        fi
+    fi
+    rm -rf "$WEB_DIR/dist" "$WEB_DIR/.angular/cache" 2>/dev/null
+    if ! (cd "$WEB_DIR" && npx ng build --configuration production >/tmp/release-ng-build.log 2>&1); then
+        echo "✗ ng build failed. See /tmp/release-ng-build.log tail:"
+        tail -30 /tmp/release-ng-build.log
+        git -C "$REPO" checkout -- "$primary_csproj" "$CHANGELOG" 2>/dev/null
+        exit 2
+    fi
+    WEB_REMOTE_ENTRY="$WEB_DIR/dist/$MODULE_NAME/browser/remoteEntry.json"
+    if [[ ! -f "$WEB_REMOTE_ENTRY" ]]; then
+        echo "✗ Web build completed but $WEB_REMOTE_ENTRY missing — federation.config.js / module-name mismatch?"
+        git -C "$REPO" checkout -- "$primary_csproj" "$CHANGELOG" 2>/dev/null
+        exit 2
+    fi
+    echo "✓ Web federation bundle built"
+else
+    echo "· No web/ federation remote (backend-only module)"
+fi
+
+# ─── 4. Build backend ─────────────────────────────────────────────
 echo "→ Building Release..."
 if ! dotnet build -c Release "$primary_csproj" >/tmp/release-build.log 2>&1; then
     echo "✗ Build failed. See /tmp/release-build.log tail:"
@@ -220,7 +261,7 @@ if ! dotnet build -c Release "$primary_csproj" >/tmp/release-build.log 2>&1; the
 fi
 echo "✓ Build clean"
 
-# ─── 4. Pack ───────────────────────────────────────────────────────
+# ─── 5. Pack ───────────────────────────────────────────────────────
 mkdir -p /d/NovaraDev/LocalNuGet
 echo "→ Packing..."
 if ! dotnet pack -c Release -p:NuGetPack=true "$primary_csproj" -o /d/NovaraDev/LocalNuGet >/tmp/release-pack.log 2>&1; then
@@ -234,6 +275,40 @@ if [[ ! -f "$NUPKG" ]]; then
     echo "✗ Pack completed but $NUPKG does not exist"; exit 2
 fi
 echo "✓ Packed $NUPKG"
+
+# ─── 5a. Post-pack verification ───────────────────────────────────
+# Why: 2026-04-22 incident — nupkgs shipped with stale wwwroot/ because
+# the release pipeline skipped the web build. Assert now that the baked
+# remoteEntry.json is present AND declares the current shell-sdk version.
+if [[ -f "$WEB_DIR/dist/$MODULE_NAME/browser/remoteEntry.json" ]]; then
+    VERIFY_DIR="$(mktemp -d)"
+    if ! unzip -q "$NUPKG" -d "$VERIFY_DIR" 2>/dev/null; then
+        echo "✗ Post-pack verify: could not unzip nupkg"
+        rm -rf "$VERIFY_DIR"; exit 2
+    fi
+    BAKED_ENTRY="$VERIFY_DIR/contentFiles/any/any/wwwroot/modules/$MODULE_NAME/remoteEntry.json"
+    if [[ ! -f "$BAKED_ENTRY" ]]; then
+        echo "✗ Post-pack verify FAILED: nupkg missing wwwroot/modules/$MODULE_NAME/remoteEntry.json"
+        echo "  Check csproj FederationBundle ItemGroup points to web/dist/$MODULE_NAME/browser/**"
+        rm -rf "$VERIFY_DIR"; exit 2
+    fi
+    SDK_SRC_PKG="$WORKSPACE_ROOT/NovaraWorkspaceShell/novara-shell-sdk/package.json"
+    if [[ -f "$SDK_SRC_PKG" ]]; then
+        # grep/sed parsing — avoids Python + MINGW path translation issues.
+        # Root package.json: grab first occurrence of "version": "X.Y.Z".
+        EXPECTED_SDK="$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' "$SDK_SRC_PKG" | head -1 | sed -E 's|.*"([^"]+)"$|\1|')"
+        # remoteEntry.json: window 8 lines after the shell-sdk packageName line,
+        # then grab the first "version" line inside that window.
+        BAKED_SDK="$(grep -A8 '"packageName"[[:space:]]*:[[:space:]]*"@novara/shell-sdk"' "$BAKED_ENTRY" | grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's|.*"([^"]+)"$|\1|')"
+        if [[ -z "$BAKED_SDK" ]] || [[ "$BAKED_SDK" != "$EXPECTED_SDK" ]]; then
+            echo "✗ Post-pack verify FAILED: baked @novara/shell-sdk='$BAKED_SDK', expected '$EXPECTED_SDK'"
+            echo "  The web build consumed a stale workspace symlink. Rebuild @novara/shell-sdk dist and retry."
+            rm -rf "$VERIFY_DIR"; exit 2
+        fi
+        echo "✓ Verified: baked @novara/shell-sdk=$BAKED_SDK"
+    fi
+    rm -rf "$VERIFY_DIR"
+fi
 
 # ─── 5. Push to NuGet feed ─────────────────────────────────────────
 if [[ "$skip_publish" == false ]]; then

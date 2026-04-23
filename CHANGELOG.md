@@ -12,6 +12,13 @@ All notable changes. Format: CalVer `YYYY.M.D.N`. Newest first.
 ### Fixed
 - rebuild with central packaging policy (source maps excluded)
 
+## 26.4.230
+
+### Fixed
+- fleet re-pack — rebuilt web federation, verified baked shell-sdk/ui-kit versions
+
+---
+
 ---
 
 ---

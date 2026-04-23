@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>Novara.Connector.SignalR</PackageId>
-    <Version>26.4.223</Version>
+    <Version>26.4.230</Version>
     <Authors>Monocept</Authors>
     <Company>Monocept</Company>
     <Description>SignalR Hub connector for Novara — real-time notification delivery + client lifecycle events from the internal NovaraSignalRHub service.</Description>

@@ -14,7 +14,7 @@
     this module's source as a zip), the Exists() condition is false, the
     import is a no-op, and `dotnet restore` fails with a clear CPM error
     ("no PackageVersion found") — prompting the user to clone the
-    meta-repo: https://github.com/MonoceptOfficial/NovaraWorkspace
+    meta-repo: https://dev.azure.com/Novara-Monocept/Workspace/_git/NovaraWorkspace
 
     Package pins live ONLY in the meta-repo's Directory.Packages.props.
     ═══════════════════════════════════════════════════════════════════

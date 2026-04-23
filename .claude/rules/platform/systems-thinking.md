@@ -27,7 +27,7 @@ globs: "**/*"
      See `.claude/rules/versioning.md` for the full policy.
    - External agent SDKs (published to npm / external NuGet feeds) MAY use
      semver if ecosystem convention demands it — CalVer is strict only for
-     Novara-owned packages on the internal GitHub Packages feed.
+     Novara-owned packages on the internal Azure Artifacts feed.
    - Track which version each product has installed.
    - Heartbeat reports version — Novara can alert on outdated agents
      (age computed as today's date minus the version's date segment).

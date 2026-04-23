@@ -213,7 +213,7 @@ suffixes correctly.
 
 **Q: Does CalVer break NuGet Gallery or npm registry tooling?**
 A: No. Both have always supported arbitrary numeric version segments.
-Tested on GitHub Packages and npmjs.com.
+Tested on Azure Artifacts and npmjs.com.
 
 ---
 

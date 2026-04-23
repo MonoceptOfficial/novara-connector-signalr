@@ -28,7 +28,7 @@ Install → OnInstallAsync → OnEnableAsync → (running) → OnDisableAsync �
 - This allows host to use services without loading plugin assembly
 
 ## NuGet packaging:
-- Feed: `nuget.pkg.github.com/MonoceptOfficial`
+- Feed: `nuget.pkg.dev.azure.com/Novara-Monocept/Workspace`
 - Release: `./release.sh "short changelog message"` — one command (preferred)
 - Manual: `dotnet pack -c Release -o ./nupkgs` + `dotnet nuget push --source ... --api-key ...`
 - Version: **CalVer `YYYY.M.D.N`** (2026-04-21 adopted). Breaking change signal

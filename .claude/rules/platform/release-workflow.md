@@ -37,8 +37,8 @@ working tree:
 5. **Prepends** a `CHANGELOG.md` entry with the typed section
 6. **Builds** Release — aborts on any error (rolls back csproj + CHANGELOG)
 7. **Packs** the NuGet to `D:/NovaraDev/LocalNuGet/`
-8. **Pushes** the NuGet to `nuget.pkg.github.com/MonoceptOfficial` using
-   `$GITHUB_TOKEN`
+8. **Pushes** the NuGet to `nuget.pkg.dev.azure.com/Novara-Monocept/Workspace` using
+   `$AZURE_DEVOPS_PAT`
 9. **Updates** the central `Directory.Packages.props.template` in NovaraSDK
    (if SDK is a sibling clone) — pins the new version for all consumers
 10. **Propagates** the updated template to all 44 consumer repos via
@@ -87,18 +87,18 @@ csproj + CHANGELOG are rolled back. Investigate, fix, re-run. No NuGet
 was published, no commits were made.
 
 ### Publish failure (exit 3)
-Build worked, pack worked, the NuGet push to GitHub Packages failed.
+Build worked, pack worked, the NuGet push to Azure Artifacts failed.
 The `.nupkg` is on disk at `/d/NovaraDev/LocalNuGet/$PACKAGE.$VERSION.nupkg`.
 Git repo is still clean (no commit yet). Common causes:
-- `GITHUB_TOKEN` invalid / expired / missing `write:packages` scope
+- `AZURE_DEVOPS_PAT` invalid / expired / missing `Packaging (Read & Write)` scope
 - Network / feed downtime
 - Version conflict (someone published the same number from another machine)
 
 Fix the cause, re-run the push command manually:
 ```bash
 dotnet nuget push /d/NovaraDev/LocalNuGet/PackageName.Version.nupkg \
-  --source "https://nuget.pkg.github.com/MonoceptOfficial/index.json" \
-  --api-key "$GITHUB_TOKEN"
+  --source "https://pkgs.dev.azure.com/Novara-Monocept/Workspace/_packaging/workspace/nuget/v3/index.json" \
+  --api-key "$AZURE_DEVOPS_PAT"
 ```
 
 ### Commit/push failure (exit 4)
@@ -159,7 +159,7 @@ published 30 seconds ago with a fix. To roll back:
 2. Update CHANGELOG entry noting what the rollback addressed.
 3. Consumers update via `git pull`.
 
-You can **unlist** a bad version on GitHub Packages (admin UI) so
+You can **unlist** a bad version on Azure Artifacts (admin UI) so
 consumers can't inadvertently pull it on a fresh restore, but the
 version string is permanent.
 

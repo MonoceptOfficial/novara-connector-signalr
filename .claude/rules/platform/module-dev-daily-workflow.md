@@ -27,7 +27,7 @@ What happens (all automatic):
 
 1. `git pull origin master --ff-only`
 2. Refresh `Directory.Packages.props` from the canonical NovaraSDK template
-   (fetches over HTTPS with your `GITHUB_TOKEN`, or from the local
+   (fetches over HTTPS with your `AZURE_DEVOPS_PAT`, or from the local
    `NovaraSDK/distribution/` clone if you have it as a sibling repo)
 3. Diff shown if CPM pins moved — e.g. "Novara.Shell.UI 26.4.220 → 26.4.222"
 4. `dotnet nuget locals http-cache --clear`
@@ -121,7 +121,7 @@ One command does all of:
 3. Prepends `CHANGELOG.md` entry under the right section
 4. `dotnet build` (rolls back csproj + CHANGELOG if it fails)
 5. `dotnet pack` to `D:/NovaraDev/LocalNuGet/`
-6. `dotnet nuget push` to `nuget.pkg.github.com/MonoceptOfficial`
+6. `dotnet nuget push` to `nuget.pkg.dev.azure.com/Novara-Monocept/Workspace`
 7. Updates `NovaraSDK/distribution/Directory.Packages.props.template`
    (if you have NovaraSDK cloned as a sibling)
 8. Runs `propagate-packages.sh --apply` → every consumer repo's
@@ -142,7 +142,7 @@ Other module devs see the new version on their next `/pull`.
 | "Build fails: 'package X version Y not found'" | `Directory.Packages.props` pins a version that isn't on the feed yet | Wait for the release to finish propagating. Or `/update-deps` to pull latest. |
 | "Pre-commit blocks my version bump" | Changed csproj `<Version>` without touching `CHANGELOG.md` | Use `./release.sh` — it handles both. Never hand-bump the version. |
 | "Chrome won't load after deploy" | Should no longer happen — regex cache classifier + no-cache on entry files makes this structurally impossible. If it does, report — likely a regression. | — |
-| `dotnet restore` says 401 | `GITHUB_TOKEN` expired | Regenerate at https://github.com/settings/tokens with `read:packages` |
+| `dotnet restore` says 401 | `AZURE_DEVOPS_PAT` expired | Regenerate at https://github.com/settings/tokens with `Packaging (Read)` |
 | `/pull` says "CPM pins have changed since your last refresh" every day | Someone else is releasing modules regularly — this is NORMAL. Commit the change (`git add Directory.Packages.props && git commit -m "chore: sync CPM pins"`). | — |
 
 ---

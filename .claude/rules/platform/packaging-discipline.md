@@ -10,7 +10,7 @@ Two compounding bugs produced 40× bloat:
 1. Every module csproj used `<Content Include=".../browser/**/*" Pack="true" />` — a glob
    that sweeps in `.js`, `.js.map`, `.css.map`, `3rdpartylicenses.txt`,
    `prerendered-routes.json`, `stats.json` — everything Angular's production build emits.
-2. `novara-shell/web/public/modules/` is populated by `scripts/build-all-modules.sh` for
+2. `NovaraWorkspaceShell/novara-shell/web/public/modules/` is populated by `scripts/build-all-modules.sh` for
    local dev convenience (Gateway serves module remotes from there). Angular's `ng build`
    copies `public/` verbatim into `dist/`. `release-shell-ui.sh` then packs the dist into
    `Novara.Shell.UI` — duplicating every module's federation bundle inside the Shell NuGet.
@@ -57,7 +57,7 @@ at the SOURCE REPOSITORY level; we don't re-ship it with every binary.
 Files matching:
 - `**/wwwroot/modules/**`
 
-`novara-shell/web/public/modules/` and `novara-shell/web/dist/**/wwwroot/modules/` are
+`NovaraWorkspaceShell/novara-shell/web/public/modules/` and `NovaraWorkspaceShell/novara-shell/web/dist/**/wwwroot/modules/` are
 populated by `scripts/build-all-modules.sh` so the Gateway serves module remotes from
 the Shell during local dev. Each federated module ships its **own** `Novara.Module.X`
 NuGet whose Content includes `wwwroot/modules/novara-module-X/`. Packing that content

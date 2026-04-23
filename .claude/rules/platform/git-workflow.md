@@ -5,7 +5,7 @@ globs: .claude/fix-issue.md, .github/**
 # Git & Issue Workflow
 
 ## Branching Convention
-- All repos (NovaraWorkspaceShell, novara-shell, NovaraModules, NovaraSDK, NovaraPlatformDB) use `master` branch
+- All repos (Common, NovaraWorkspaceShell, NovaraModules/*, NovaraSDK, NovaraConnectors/*, NovaraPlatformDB) use `master` branch
 - Work directly on `master` for now (single developer)
 - No slashes in branch names: `fix1`, `feature1` (NOT `fix/1`)
 - If branch exists on remote, version it: `fix1v2`, `fix1v3`

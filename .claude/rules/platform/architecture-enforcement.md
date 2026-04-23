@@ -71,7 +71,7 @@ If you genuinely have a case the hook misjudges, you have three options (in orde
 
 1. **Refactor to fit the rule.** Usually possible; usually makes the code better. If the rule says "use IEventBus" and you wanted to call another module directly, IEventBus is almost always the right answer.
 
-2. **Add an explicit exception in the hook.** If your case is one the rule should know about (like `AuditExecutionService` legitimately inspecting `pg_proc`), edit `check-module-boundaries.py` to add the exception, with a comment explaining why. Raise a PR to NovaraWorkspaceShell.
+2. **Add an explicit exception in the hook.** If your case is one the rule should know about (like `AuditExecutionService` legitimately inspecting `pg_proc`), edit `check-module-boundaries.py` to add the exception, with a comment explaining why. Raise a PR to Workspace/Common.
 
 3. **Disable the hook locally for one edit** by removing it from `.claude/settings.json`. **DON'T DO THIS** — the change shows up in your PR diff and the CI will fail anyway. It also signals to reviewers that you're working around the architecture.
 
@@ -94,7 +94,7 @@ When you discover a new pattern that should be banned (or warned):
 1. Add the check to `check-module-boundaries.py` (test it first — false positives are worse than missed violations)
 2. Document it in this file
 3. Add an entry to `learned-errors.md` describing the bug class
-4. Run `bash distribution/propagate-rules.sh all --commit` to push it everywhere
+4. Run `bash shared/scripts/propagate-rules.sh all --commit` to push it everywhere
 
 The more rules accumulate, the safer the platform gets. By the time you have 50+ rules, an entire class of bugs is impossible to write.
 
@@ -102,8 +102,8 @@ The more rules accumulate, the safer the platform gets. By the time you have 50+
 
 ## Hook script location
 
-- **Canonical**: `NovaraWorkspaceShell/.claude/hooks/check-module-boundaries.py`
-- **Synced to**: every module's `.claude/hooks/` (via `propagate-rules.sh`)
+- **Canonical**: `Workspace/Common/.claude/hooks/check-module-boundaries.py`
+- **Synced to**: every module's `.claude/hooks/` (via `shared/scripts/propagate-rules.sh`)
 - **Configured by**: `.claude/settings.json` (PreToolUse with `matcher: "Edit|Write|MultiEdit"`)
 
 The hook is committed to git. It's part of the contract every module owner agrees to. Disabling it = visible in PR diff = caught in review.

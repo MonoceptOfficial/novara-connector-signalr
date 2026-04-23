@@ -61,7 +61,7 @@ Use the **bug-investigation protocol** (`.claude/rules/bug-investigation.md`): w
 
 ## Stubbed-module gotcha (Shell tsconfig)
 
-`novara-shell/web/tsconfig.json` has `paths` entries like:
+`NovaraWorkspaceShell/novara-shell/web/tsconfig.json` has `paths` entries like:
 
 ```
 "@novara/module-plan": ["src/stubs/module-plan.ts"]   ← STUB (empty routes)
@@ -72,7 +72,7 @@ The stub path exports EMPTY route arrays. If a module's tsconfig path points at 
 
 Shell's default is "stubs for everything" so `ng serve` works without cloning every module repo. When you clone a module, flip its ONE tsconfig line from stub to source path. When the federation build for that module is published as a NuGet/npm artifact, that becomes the real target instead.
 
-**Hit this symptom?** Open `novara-shell/web/tsconfig.json`, find the module's line, confirm it points at `../../NovaraModules/novara-module-{name}/web/index.ts` and not at a stub.
+**Hit this symptom?** Open `NovaraWorkspaceShell/novara-shell/web/tsconfig.json`, find the module's line, confirm it points at `../../NovaraModules/novara-module-{name}/web/index.ts` and not at a stub.
 
 ## Common URL mistakes
 

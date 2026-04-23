@@ -266,7 +266,7 @@ Every bug whose root cause wasn't obvious, repeated 2×, took >10 min to diagnos
 ### NGDEVMODE_UNDEFINED_AFTER_LONG_HMR — `ngDevMode is not defined` during class-field init
 **Pattern:** Fresh page load (Ctrl+Shift+R or cross-origin navigation) crashes at service construction with `ReferenceError: ngDevMode is not defined`, usually surfacing on whichever service has a class field like `_modules = signal([], ...ngDevMode ? [{debugName:'_modules'}] : [])`. DevTools shows the stack inside a compiled `_ServiceName` constructor at a field-initializer line. App doesn't bootstrap; `<app-root>` stays empty.
 **Root cause:** Angular 21's `signal(..., { debugName })` emits `ngDevMode ? [...] : []` in compiled output. `ngDevMode` is a build-time global that `@angular/build` + esbuild inject via a `define:` plugin in dev builds. After many hours of HMR (12+ hrs observed), rebuilt chunks occasionally lose the define and the flag is simply undefined. Production builds replace it with `false` via terser and are unaffected. Class fields initialize BEFORE the constructor, so the error fires before any `try/catch`.
-**Fix:** Top of `novara-shell/web/src/main.ts` (BEFORE any `import`): `(globalThis as any).ngDevMode ??= true;`. Guards against the esbuild define drifting off rebuilt chunks — harmless in prod (terser strips the branch). Plus: after long sessions, `bash scripts/restart-dev.sh shell` forces a clean `.angular/cache` + federation-cache wipe.
+**Fix:** Top of `NovaraWorkspaceShell/novara-shell/web/src/main.ts` (BEFORE any `import`): `(globalThis as any).ngDevMode ??= true;`. Guards against the esbuild define drifting off rebuilt chunks — harmless in prod (terser strips the branch). Plus: after long sessions, `bash scripts/restart-dev.sh shell` forces a clean `.angular/cache` + federation-cache wipe.
 **Guardrail:** Polyfill stays in main.ts as belt-and-braces. `trace-dev-entry.js` in `.claude/tools/playwright-e2e/` surfaces this class of error on every "Shell is stuck" investigation.
 **Why it hides:** User's real browser survives with cached chunks locked in a working set. Full page reload (hard-refresh, cross-origin navigation, new tab) re-fetches fresh and exposes the rot. Appeared when Gateway cross-origin `/dev-entry` redirect (Shell on :4200, Gateway API-only on :5050) forced a full navigation from :5050 to :4200 on 2026-04-22.
 **Module(s):** Novara Shell UI + any module using `signal({ debugName })`.
@@ -285,25 +285,19 @@ Every bug whose root cause wasn't obvious, repeated 2×, took >10 min to diagnos
 **Guardrail:** Any adapter forwarding model names to LLM CLI normalizes product-name aliases. Log stdout on failure (not just stderr) for Node.js-based CLIs.
 **Module(s):** novara.agentic.
 
-### DAPPER_UNDERSCORE_SILENT_DROP — RESOLVED (2026-04-15) / CONVENTION FULLY RETIRED (2026-04-22)
-**Historical (2026-04-15):** Snake_case columns (`is_system`, `content_type`) mapped to C# defaults. No error. Dapper's default mapping is case-insensitive but didn't bridge underscores.
-**Column-mapping fix (2026-04-15):** `Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true` in `DapperModuleDbContext` static ctor. Snake_case ↔ PascalCase bridges automatically.
-**Param-mapping fix (2026-04-22):** `BuildPgCall` rewritten to introspect `pg_proc.proargnames` at runtime and match C# properties against actual DB param names. Replaced the brittle name-contains-underscore heuristic that was the indirect cause of SP_VERSION_BUMP_MISSED_PARAM_MIGRATION (see below).
-**Convention:** 2026-04-22 snake_case is **MANDATORY** for every new function. Pre-commit hook blocks legacy params. Existing legacy functions still work (introspection bridges), but ~700 of the original ~800 were swept to snake_case.
-**Guardrail:** Pre-commit hook `check-sql-param-naming.py` + Gateway introspection + Phase 4 startup validator.
+### DAPPER_UNDERSCORE_SILENT_DROP + SP_VERSION_BUMP_MISSED_PARAM_MIGRATION — SUPERSEDED (2026-04-22)
+**Historical pattern:** Two incidents, now fully resolved:
+1. (2026-04-15) Dapper's default column mapping didn't bridge `snake_case` columns to C# PascalCase → silent nulls. Fixed same-day via `DefaultTypeMap.MatchNamesWithUnderscores = true`.
+2. (2026-04-22) Gateway's `BuildPgCall` heuristic ("function name has underscore? → send snake_case params, else lowercase") produced 42883s for 54 "drifter bomb" functions where the name acquired an underscore but params stayed on legacy form.
 
-### SP_VERSION_BUMP_MISSED_PARAM_MIGRATION — RESOLVED (2026-04-22)
-**Pattern:** Function renamed with underscore suffix (`get_by_key`, `foo_v2`) but params stayed on legacy no-underscore naming (`p_promptkey`, `p_userid`). Gateway's name-contains-underscore heuristic decided "this looks snake_case, convert params to snake_case" → SQL sent `p_prompt_key := @X` → PG rejected with 42883 because the function actually has `p_promptkey`.
-**Root cause:** Two conventions coexisted (lowercase-no-underscore + snake_case). The Gateway chose per-SP based on function NAME alone, producing wrong guesses for 54 "drifter bomb" functions where name had `_` but params didn't.
-**Fix:** Phase 1 introspection. `BuildPgCall` queries `pg_proc.proargnames` (filtered via `proargmodes` to IN/INOUT/VARIADIC), caches per-process, matches C# properties to actual DB param names underscore-insensitive. No more guessing. See `.claude/architecture/2026-04-22-sp-calling-convention-adr.md`.
-**Also covered:** function overloads (42 in Novara) now disambiguated by best-match scoring + explicit NULL emission for unmatched DB params under `hasOverloads`.
-**Guardrail:** Introspection + pre-commit hook blocking new legacy params + snake_case sweep migrations converting existing drifters + Phase 4 startup validator.
-**Module(s):** Gateway `DapperModuleDbContext` + `DapperPlatformDbContext`. All 40 module schemas swept (88% converged).
+**Resolution (both):** See `.claude/architecture/2026-04-22-sp-calling-convention-adr.md` — Phase 1 runtime introspection (BuildPgCall queries `pg_proc.proargnames` per call, caches per-process), Phase 2 snake_case sweep (800 ProductDB functions converged, 0 drifters remain), Phase 3 pre-commit hook (`check-sql-param-naming.py` blocks new legacy params), Phase 4 startup validator (`SpNamesValidator` checks every SpNames constant against pg_proc at boot).
+
+**Why kept as a one-liner here:** future agent hitting a 42883 should recognize the CLASS, not redo the investigation. The 54 drifter bombs are defused; the bug class is closed.
 
 ### INTROSPECTION_CACHE_STALE_AFTER_DDL — OPEN (2026-04-22)
 **Pattern:** Gateway's `_spParamNamesCache` (ConcurrentDictionary, per-process) caches `pg_proc.proargnames` on first call. When DDL renames a function's params mid-session, the Gateway keeps calling with the OLD names and hits 42883.
 **Workaround:** restart Gateway after any function-signature-changing migration.
-**Planned fix:** LISTEN/NOTIFY on `pg_proc` changes OR time-based TTL on the cache OR admin endpoint to flush. Task #19 in sp-naming-standardization tracker.
+**Planned fix:** LISTEN/NOTIFY on `pg_proc` changes OR time-based TTL on the cache OR admin endpoint to flush. Tracked in ADR § Open items.
 **Module(s):** Gateway infrastructure.
 
 ### BROWSER_CACHE_STALE — "Clear cache to recover" ritual after every deploy

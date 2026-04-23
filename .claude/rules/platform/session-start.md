@@ -81,7 +81,7 @@ If handover had pending items: **"Picking up from <name>'s handover. First pendi
 **Function Naming:** Per-module SpNames.cs — `"issues.Upsert"`, `"roadmap.GetFeaturesByTrack"`, `"platform.GetProducts"`
 **Permissions:** All in `Permissions.cs`
 **Build:** `dotnet build` | **Run:** `dotnet run --project src/Novara.Shell.Api` → https://localhost:5050
-**Frontend:** `../novara-shell/web/` (Angular 21, http://localhost:4200)
+**Frontend:** `../NovaraWorkspaceShell/novara-shell/web/` (Angular 21, http://localhost:4200)
 **Product DB Files:** `../NovaraWorkspaceProductDB/` (per-module schemas + productcore + productmeta)
 **Platform DB Files:** `../../NovaraPlatformDB/` (platform + viber schemas)
 

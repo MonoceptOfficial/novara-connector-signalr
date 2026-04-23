@@ -51,4 +51,4 @@ For TelemetryHub, that cost is justified — the three properties make it an act
 
 ## Precedent incident
 
-On 2026-04-21 we scaffolded `NovaraAgenticHub/` and `NovaraPromptStudio/` as sibling products. Within the same session we recognized neither passes the test and consolidated both into their respective Workspace modules. The scaffold bytes were cheap; the future maintenance cost would not have been. Redirects live at `D:/NovaraDev/NovaraAgenticHub/README.md` and `D:/NovaraDev/NovaraPromptStudio/README.md`.
+On 2026-04-21 we scaffolded `NovaraAgenticHub/` and `NovaraPromptStudio/` as sibling products. Within the same session we recognized neither passes the test and consolidated both into their respective Workspace modules (`novara-module-agentic`, `novara-module-promptstudio`). The scaffold dirs at `D:/NovaraDev/NovaraAgenticHub/` and `D:/NovaraDev/NovaraPromptStudio/` were subsequently removed — only the modules remain.

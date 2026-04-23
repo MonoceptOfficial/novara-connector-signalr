@@ -4,7 +4,7 @@ Two customers are ready to deploy. Every line of code must be written with this 
 
 ## 1. No New Portals — One Novara UI
 
-Do NOT create separate customer portals, admin dashboards, or alternative UIs. Novara has ONE frontend (Shell UI at novara-shell/web). Scope visibility using roles and permissions, not separate apps. This keeps the codebase maintainable and deployable.
+Do NOT create separate customer portals, admin dashboards, or alternative UIs. Novara has ONE frontend (Shell UI at `NovaraWorkspaceShell/novara-shell/web`). Scope visibility using roles and permissions, not separate apps. This keeps the codebase maintainable and deployable.
 
 ## 2. Credentials Are Per-Tenant, Never Shared
 

@@ -62,10 +62,10 @@ Check if the abstraction already exists in `@novara/shell-sdk` or
 
 ```
 # TypeScript SDK surface
-cat /d/NovaraDev/Workspace/novara-shell-sdk/src/index.ts
+cat /d/NovaraDev/Workspace/NovaraWorkspaceShell/novara-shell-sdk/src/index.ts
 
 # .NET SDK surface
-grep -r "public interface I" /d/NovaraDev/Workspace/NovaraSDK/src --include="*.cs"
+grep -r "public interface I" /d/NovaraDev/Workspace/NovaraWorkspaceShell/NovaraSDK/src --include="*.cs"
 ```
 
 Common traps:

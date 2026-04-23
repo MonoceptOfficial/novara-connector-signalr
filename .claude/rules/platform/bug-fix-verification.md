@@ -43,7 +43,7 @@ Verify the specific field you fixed is present and has the right value. Don't ju
 
 **Step 3: Frontend compiles**
 ```bash
-cd ../novara-shell/web && npx ng build --configuration development 2>&1 | tail -5
+cd ../NovaraWorkspaceShell/novara-shell/web && npx ng build --configuration development 2>&1 | tail -5
 ```
 
 **Step 4: If API is running — test the actual endpoint**
